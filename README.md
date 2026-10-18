@@ -4,13 +4,28 @@ Frame your photos with a border, a title and the camera info read from the photo
 
 Built on [ImageMagick](https://imagemagick.org), which draws every frame, texture and letter, and [ExifTool](https://exiftool.org) by Phil Harvey, which reads the camera, lens and film-simulation data. bordermagick is a shell script on top of these two.
 
-![White border](examples/white.jpg)
+<p align="center">
+  <img src="examples/white.jpg" alt="White border" width="99%">
+  <br><code>-b white</code>
+</p>
 
-| | |
-|---|---|
-| ![Contact sheet](examples/contact.jpg) `-b contact` | ![Frosted glass](examples/frost.jpg) `-b frost` |
-| ![Dark marble](examples/marble-dark.jpg) `-b marble-dark` | ![Terrazzo](examples/terrazzo.jpg) `-b terrazzo` |
-| ![Sunset gradient](examples/sunset.jpg) `-b sunset` | ![Beige marble](examples/marble-beige-portrait.jpg) `-b marble-beige` |
+<p align="center">
+  <img src="examples/marble-beige.jpg" alt="Beige marble border" width="49%">
+  <img src="examples/frost.jpg" alt="Frosted glass border" width="49%">
+  <br><code>-b marble-beige</code> · <code>-b frost</code>
+</p>
+
+<p align="center">
+  <img src="examples/marble-dark.jpg" alt="Dark marble border" width="49%">
+  <img src="examples/contact.jpg" alt="Film contact sheet border" width="49%">
+  <br><code>-b marble-dark</code> · <code>-b contact</code>
+</p>
+
+<p align="center">
+  <img src="examples/terrazzo.jpg" alt="Terrazzo border" width="49%">
+  <img src="examples/sunset.jpg" alt="Sunset gradient border" width="49%">
+  <br><code>-b terrazzo</code> · <code>-b sunset</code>
+</p>
 
 ## What it does
 
