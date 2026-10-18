@@ -2,6 +2,8 @@
 
 Frame your photos with a border, a title and the camera info read from the photo's EXIF data — from plain white to marble, frosted glass and an Instax-style contact sheet.
 
+Built on [ImageMagick](https://imagemagick.org), which draws every frame, texture and letter, and [ExifTool](https://exiftool.org) by Phil Harvey, which reads the camera, lens and film-simulation data. bordermagick is a shell script on top of these two.
+
 ![White border](examples/white.jpg)
 
 | | |
