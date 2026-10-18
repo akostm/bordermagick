@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Personal photos and generated frames in the project root (examples/ is published)
+/*.jpg
+/*.jpeg
+/*.JPG
+/*.heic
+/*.HEIC
+/*.png
+/*.tif
+/*.tiff
+
+# Not redistributable / not used: extracted system fonts, local logo copies
+/fonts/
+/logos/
