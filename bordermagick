@@ -88,13 +88,14 @@ pastel() {  # name -> hex for the Instax-style presets; anything else passes thr
 }
 
 ME=$(basename "$0")
+VERSION="1.0.0"
 help() {
   cat <<HELP
 $ME — frame photos with a border, title, camera info and maker logo
 
 Usage: $ME [-b border] [-p strength] [-s size] [-m metadata] photo.jpg …
        $ME -L
-       $ME -h
+       $ME -h | -V
 
 Writes <photo>_<border>_<size>.jpg next to each photo (IMG_0042_marble_4k.jpg;
 colours are written without # or brackets: IMG_0042_2B4C7E_grow.jpg). The title comes from the photo's
@@ -126,6 +127,7 @@ Title tag, else its City, else the file name; the line below shows city and date
                      what's printed on it.
   -L           Download all known manufacturer logos now (only missing ones), then exit
   -h           Show this help
+  -V           Show the version
 
 Examples:
   $ME holiday/*.jpg
@@ -222,9 +224,10 @@ die() {  # message [hint]
 }
 
 [[ "${1:-}" == --help ]] && { help; exit 0; }
+[[ "${1:-}" == --version ]] && { echo "$ME $VERSION"; exit 0; }
 DOWNLOAD_ALL=0
 BORDER="white"; PAPER=6; SIZE="grow"; META="keep"
-while getopts ":b:p:s:m:Lh" opt; do
+while getopts ":b:p:s:m:LhV" opt; do
   case "$opt" in
     b) BORDER="$OPTARG" ;;
     p) PAPER="$OPTARG" ;;
@@ -232,6 +235,7 @@ while getopts ":b:p:s:m:Lh" opt; do
     m) META="$OPTARG" ;;
     L) DOWNLOAD_ALL=1 ;;
     h) help; exit 0 ;;
+    V) echo "$ME $VERSION"; exit 0 ;;
     :) die "option -$OPTARG needs a value" ;;
     *) die "unknown option -$OPTARG" ;;
   esac
