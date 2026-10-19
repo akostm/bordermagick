@@ -11,6 +11,7 @@ LOGO_DIR="$BM_HOME/logos"
 FONT="/System/Library/Fonts/Supplemental/DIN Alternate Bold.ttf"
 FONT_COND="/System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf"   # film edge print
 AMBER="#F2B134"                                                        # contact-sheet ink
+SERIF="/System/Library/Fonts/Supplemental/Georgia"                     # museum label: + .ttf / Bold / Italic
 SEP="∙"
 
 TMP=$(mktemp -d)
@@ -94,7 +95,7 @@ pastel() {  # name -> hex for the Instax-style presets; anything else passes thr
 }
 
 ME=$(basename "$0")
-VERSION="1.0.1"
+VERSION="1.1.0"
 help() {
   cat <<HELP
 $ME — frame photos with a border, title, camera info and maker logo
@@ -117,6 +118,9 @@ Title tag, else its City, else the file name; the line below shows city and date
                  Stone:      marble, marble-dark, marble-green, marble-beige, terrazzo
                              (photo and lettering inset into the stone)
                  Fabric:     linen
+                 Gallery:    museum, museum-white, museum-black   wide mat (warm off-white,
+                             white or black) with a bevelled opening and a museum wall label:
+                             title, place and year, medium (film simulation), camera, exposure
                  Film:       contact    black contact-sheet frame printed in amber, with film-edge
                              markings along the top instead of a logo: maker, film simulation
                              and ISO (FUJIFILM PROVIA ISO 200, SONY ISO 200), and frame
@@ -281,7 +285,7 @@ esac
 
 # Border: named styles are fine as-is; anything else must be one colour, or two joined by "-"
 case "$BORDER" in
-  auto|frost|frost-dark|marble|marble-dark|marble-green|marble-beige|terrazzo|linen|contact) ;;
+  auto|frost|frost-dark|marble|marble-dark|marble-green|marble-beige|terrazzo|linen|contact|museum|museum-white|museum-black) ;;
   *)
     IFS=- read -r -a parts <<<"$(pastel "$BORDER")"
     (( ${#parts[@]} <= 2 )) ||
@@ -331,13 +335,21 @@ u() { echo $(( S * $1 / 1000 )); }   # tenths of a percent of the photo's short 
 #   INSET    photo and lettering cut into the surface (stone)
 #   LOGO_ON  maker logo above the camera info
 #   FILM     contact-sheet layout: edge print, one condensed uppercase size, no logo
+#   MUSEUM   mat-board layout: wide bottom-weighted mat, bevelled opening, wall label instead of the strip
 style_setup() {
-  KIND=solid; INSET=0; LOGO_ON=1; FILM=0
+  KIND=solid; INSET=0; LOGO_ON=1; FILM=0; MUSEUM=0
   case "$BORDER" in
     frost|frost-dark) KIND=frost ;;
     marble|marble-dark|marble-green|marble-beige|terrazzo) KIND=material; INSET=1 ;;
     linen) KIND=material ;;
     contact) KIND=film; LOGO_ON=0; FILM=1 ;;
+    museum|museum-white|museum-black) KIND=museum; LOGO_ON=0; MUSEUM=1
+      # mat, bevel core, label ink (title), label ink (details)
+      case "$BORDER" in
+        museum)       MAT="#F3F0E8"; CORE="#FBFAF6"; INK="#2A2826"; INK2="#6E6A64" ;;
+        museum-white) MAT="#FAFAF8"; CORE="#FFFFFF"; INK="#2A2826"; INK2="#6E6A64" ;;
+        museum-black) MAT="#161616"; CORE="#ECEAE4"; INK="#E8E6E1"; INK2="#A39F98" ;;
+      esac ;;
     auto) ;;
     *) if [[ "$(pastel "$BORDER")" == *-* ]]; then KIND=gradient; fi ;;   # "colour1-colour2"
   esac
@@ -411,6 +423,10 @@ layout() {
     TOPB=$(( 2 * B ))
     PS=$(u 22); PT=$PS; BOT=$(u 110); Y_TITLE=$(u 64); Y_CAM=$(u 64); Y_LOW=$(u 30)
   fi
+  if (( MUSEUM )); then
+    # Mat board: wide, and taller at the bottom so the photo doesn't look like it's sliding down
+    B=$(u 140); TOPB=$B; BOT=$(u 260)
+  fi
   FW=$(( W + 2*B )); FH=$(( H + TOPB + BOT ))
 
   # Optical sizing: a square badge at a wordmark's height looks tiny, so logos narrower than ~5:1 grow
@@ -464,6 +480,7 @@ background() {
       material "$BG" $FW $FH "$TMP/material.miff"
       canvas=( "$TMP/material.miff" ) ;;
     film)     canvas=( "xc:#111111" ) ;;
+    museum)   canvas=( "xc:$MAT" ) ;;
     gradient) canvas=( -define gradient:angle=135 "gradient:$BG" ) ;;   # diagonal, top-left -> bottom-right
     *)        canvas=( "xc:$BG" ) ;;
   esac
@@ -485,6 +502,7 @@ ink() {
     DARK=0; FG="#222222"; FG2="rgba(0,0,0,0.5)"
   fi
   if (( FILM )); then FG="$AMBER"; FG2="rgba(242,177,52,0.6)"; fi
+  if (( MUSEUM )); then FG="$INK"; FG2="$INK2"; fi
   return 0
 }
 
@@ -492,13 +510,14 @@ ink() {
 # embossed into a grey relief map and hard-light blended (so it shows on pure white as well as on dark
 # colours). Built at half size and scaled up: ~3x faster, and the grain is soft enough that it doesn't show.
 paper() {
-  if [[ "$KIND" == solid || "$KIND" == gradient ]] && (( PAPER > 0 )); then
-    local hw=$(( FW / 2 )) hh=$(( FH / 2 ))
+  if [[ "$KIND" == solid || "$KIND" == gradient || "$KIND" == museum ]] && (( PAPER > 0 )); then
+    local hw=$(( FW / 2 )) hh=$(( FH / 2 )) k=$PAPER
+    if [[ "$BORDER" == museum-black ]]; then k=$(( PAPER / 3 )); fi   # black mat board is smooth; the relief shows strongly on black
     canvas+=( \( -size ${hw}x${hh} xc:gray50 -attenuate 1 +noise Gaussian -colorspace gray
                   -motion-blur 0x$(awk -v s=$S 'BEGIN { printf "%.1f", s / 3000 }')+30
                   \( -size $(( FW / 40 ))x$(( FH / 40 )) xc:gray50 -attenuate 1 +noise Gaussian -colorspace gray
                      -blur 0x1.5 -resize ${hw}x${hh}\! \) -compose overlay -composite
-                  -shade 120x55 -auto-level +level $(( 50 - PAPER ))%,$(( 50 + PAPER ))% -resize ${FW}x${FH}\! \)
+                  -shade 120x55 -auto-level +level $(( 50 - k ))%,$(( 50 + k ))% -resize ${FW}x${FH}\! \)
               -compose hardlight -composite -compose over )
   fi
   return 0
@@ -508,8 +527,17 @@ paper() {
 # at 1/8 size and scaled up), a shadow line on the stone's cut edge above/left, and a highlight where
 # light catches it below/right
 place_photo() {
-  args=( -size ${FW}x${FH} "${canvas[@]}" ${shadow[@]+"${shadow[@]}"}
-         \( "$in" -auto-orient \) -gravity northwest -geometry +$B+$TOPB -composite )
+  args=( -size ${FW}x${FH} "${canvas[@]}" ${shadow[@]+"${shadow[@]}"} )
+  if (( MUSEUM )); then
+    # Bevelled mat opening: a bright core edge around the photo, with a soft shadow on its top and left
+    # where the light falls into the cut
+    local bev=$(( S / 250 + 2 ))
+    args+=( -fill "$CORE" -draw "rectangle $(( B - bev )),$(( TOPB - bev )) $(( B + W + bev - 1 )),$(( TOPB + H + bev - 1 ))"
+            \( -size $(( W + 2 * bev ))x$(( H + 2 * bev )) xc:none -fill "rgba(0,0,0,0.10)"
+               -draw "rectangle 0,0 $(( W + 2 * bev - 1 )),$(( bev / 2 ))" -draw "rectangle 0,0 $(( bev / 2 )),$(( H + 2 * bev - 1 ))"
+               -blur 0x1 \) -gravity northwest -geometry +$(( B - bev ))+$(( TOPB - bev )) -composite )
+  fi
+  args+=( \( "$in" -auto-orient \) -gravity northwest -geometry +$B+$TOPB -composite )
   if (( INSET )); then
     local sc=8 sw sh d sg lw
     sw=$(( W / sc )); sh=$(( H / sc )); d=$(( B / 6 / sc + 1 )); sg=$(( B / 5 / sc + 1 )); lw=$(( B / 40 + 1 ))
@@ -554,6 +582,38 @@ add_text() {
   fi
   text_layer 0 0 "$FG" "$FG2"
   return 0
+}
+
+# --- 7b. Museum wall label below the photo's right edge, in Georgia like a gallery label:
+#   Erechtheion                                   title
+#   Athens, 2023                                  place and year (italic)
+#   Digital photograph, Fujifilm Provia           medium: the film simulation, if any
+#   Fujifilm X-T20 ∙ XF18-55mm F2.8-4 R LM OIS    camera and lens
+#   35.8 mm ∙ ƒ/11.0 ∙ 1/340s ∙ ISO 200           exposure
+titlecase() { perl -CS -Mutf8 -pe 's/(\w+)/\u\L$1/g' <<<"$1"; }   # "PRO NEG. HI" -> "Pro Neg. Hi", "ACROS+R" -> "Acros+R"
+add_label() {
+  local year brand body fm medium where p1 p2 lines=() lw
+  year=$(exiftool -s3 -d %Y -DateTimeOriginal "$in")
+  where="$place${place:+${year:+, }}$year"
+  brand=""; [[ -n "$key" ]] && brand=$(brand_name "$key" | awk '{print $1}')   # "Fujifilm", "Om" -> fixed below
+  [[ "$key" == om ]] && brand="OM System"
+  # Camera: the model, with the brand in front unless the model already names it ("Canon EOS R6", "LEICA Q3")
+  body="$model"
+  if [[ -n "$brand" && -n "$model" ]] && ! grep -qi "^$(awk '{print $1}' <<<"$make")" <<<"$model" &&
+     ! grep -qi "^$key" <<<"$model"; then body="$brand $model"; fi
+  fm=$(film_name "$in"); medium="Digital photograph${fm:+, $brand $(titlecase "$fm")}"
+  p1=$(u 26); p2=$(u 20)
+  lines+=( \( -font "$SERIF Bold.ttf" -pointsize $p1 -fill "$FG" label:"$title" \) )
+  [[ -n "$where" ]] && lines+=( \( -size 1x$(( p2 / 3 )) xc:none +size \)
+                                \( -font "$SERIF Italic.ttf" -pointsize $p2 -fill "$FG" label:"$where" \) )
+  lines+=( \( -size 1x$(( p2 * 3 / 4 )) xc:none +size \)
+           \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$medium" \) )
+  [[ -n "$body$lens" ]] && lines+=( \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$body${body:+${lens:+ $SEP }}$lens" \) )
+  [[ -n "$info" ]] && lines+=( \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$info" \) )
+  magick -background none "${lines[@]}" -gravity west -append "$TMP/label.miff"
+  lw=$(magick "$TMP/label.miff" -format %w info:)
+  # A left-aligned block whose right edge lines up with the photo's right edge
+  args+=( "$TMP/label.miff" -gravity northwest -geometry +$(( B + W - lw ))+$(( TOPB + H + $(u 55) )) -composite )
 }
 
 # --- 8. Logo, on top of the camera info.
@@ -633,7 +693,9 @@ write_out() {
 }
 
 frame_photo() {
-  read_meta; layout; background; ink; paper; place_photo; add_text; add_logo; add_edge_print; write_out
+  read_meta; layout; background; ink; paper; place_photo
+  if (( MUSEUM )); then add_label; else add_text; fi
+  add_logo; add_edge_print; write_out
 }
 
 # =====================================================================================================
