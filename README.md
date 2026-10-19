@@ -150,6 +150,17 @@ Select photos in Finder → right-click → **Quick Actions → Frame with borde
 Tips:
 - To skip the metadata question, leave out step 7 and write `-m keep` or `-m strip` directly in the script; or make two shortcuts.
 
+## Development
+
+`tests/render.sh` frames a few generated test photos in every style and option, with the random textures fixed (`BORDERMAGICK_SEED`), so changes can be checked pixel for pixel:
+
+```bash
+tests/render.sh baseline     # before a change: save reference renders
+tests/render.sh compare      # after it: everything identical? differences are listed, with diff images
+```
+
+Real photos can be added as arguments. Renders go to `tests/out/` (not committed).
+
 ## License
 
 [MIT](LICENSE)

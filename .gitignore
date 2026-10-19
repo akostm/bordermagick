@@ -14,3 +14,6 @@
 # Not redistributable / not used: extracted system fonts, local logo copies
 /fonts/
 /logos/
+
+# Test renders
+/tests/out/

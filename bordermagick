@@ -16,6 +16,12 @@ SEP="∙"
 TMP=$(mktemp -d)
 trap 'rm -f "$TMP"/*; rmdir "$TMP"' EXIT
 
+# Testing hook: BORDERMAGICK_SEED fixes the random textures (marble, terrazzo, linen, frost, paper),
+# so renders are reproducible pixel for pixel. mg = magick with that seed applied.
+SEEDOPT=()
+if [[ -n "${BORDERMAGICK_SEED:-}" ]]; then SEEDOPT=( -seed "$BORDERMAGICK_SEED" ); RANDOM=$BORDERMAGICK_SEED; fi
+mg() { magick ${SEEDOPT[@]+"${SEEDOPT[@]}"} "$@"; }
+
 # Procedural border materials, rendered to $4 at $2 x $3 px
 material() {
   local name=$1 w=$2 h=$3 out=$4
@@ -33,9 +39,9 @@ material() {
       # layer and faint cloudiness. Turbulence is made at a fixed small size so the look doesn't depend on
       # resolution; the vein maths runs at 1/3 size and is scaled up.
       local tw=300 th=$(( 300 * h / w )) ww=$(( w / 3 )) wh=$(( h / 3 ))
-      magick -size ${tw}x${th} plasma:fractal -colorspace gray -blur 0x3 -auto-level -resize ${ww}x${wh}\! "$TMP/turb.png"
+      mg -size ${tw}x${th} plasma:fractal -colorspace gray -blur 0x3 -auto-level -resize ${ww}x${wh}\! "$TMP/turb.png"
       magick "$TMP/turb.png" -fx "pow(abs(sin((i/w*2.2 + j/h*1.3)*pi + u*7)), 0.22)" "$TMP/main.png"
-      magick -size ${tw}x${th} plasma:fractal -colorspace gray -blur 0x2 -auto-level -resize ${ww}x${wh}\! \
+      mg -size ${tw}x${th} plasma:fractal -colorspace gray -blur 0x2 -auto-level -resize ${ww}x${wh}\! \
         -fx "pow(abs(sin((i/w*5 - j/h*3)*pi + u*11)), 0.12)" "$TMP/fine.png"
       magick "$TMP/main.png" \( "$TMP/fine.png" +level 45%,100% \) -compose multiply -composite \
         \( "$TMP/turb.png" +level 88%,100% \) -compose multiply -composite \
@@ -67,7 +73,7 @@ material() {
       # Horizontal and vertical threads (noise smeared both ways) on warm beige. The weave is uniform, so a
       # seamless 1024px tile (wrap-around blur) is built at half scale and repeated across the frame.
       local len=$(( s / 600 + 2 ))
-      magick -size 512x512 xc:gray50 -attenuate 1 +noise Gaussian -colorspace gray -virtual-pixel tile \
+      mg -size 512x512 xc:gray50 -attenuate 1 +noise Gaussian -colorspace gray -virtual-pixel tile \
         \( +clone -motion-blur 0x${len}+0 \) \( -clone 0 -motion-blur 0x${len}+90 \) -delete 0 \
         -compose multiply -composite -auto-level +level 40%,60% -resize 1024x1024 "$TMP/weave.miff"
       magick -size ${w}x${h} tile:"$TMP/weave.miff" \( -size ${w}x${h} xc:"#E7DFD2" \) +swap \
@@ -88,7 +94,7 @@ pastel() {  # name -> hex for the Instax-style presets; anything else passes thr
 }
 
 ME=$(basename "$0")
-VERSION="1.0.0"
+VERSION="1.0.1"
 help() {
   cat <<HELP
 $ME — frame photos with a border, title, camera info and maker logo
@@ -312,49 +318,53 @@ film_name() {
   esac
 }
 
-status=0; idx=0
-for in in "$@"; do
-  idx=$(( idx + 1 ))
-  if [[ ! -f "$in" ]]; then echo "$ME: no such file: $in (skipped)" >&2; status=1; continue; fi
-  # <photo>_<border>_<size>.jpg; border made file-name safe ("#FFD6E0-#B5E2FA" -> FFD6E0-B5E2FA,
-  # "rgb(40,60,90)" -> rgb40-60-90)
-  tag=$(sed -E 's/[#()]//g; s/[^A-Za-z0-9.-]+/-/g; s/^-+|-+$//g' <<<"$BORDER")
-  out="${in%.*}_${tag}_${SIZE}.jpg"
+# =====================================================================================================
+# Framing pipeline. One photo goes through these stages in order (frame_photo); each stage reads and
+# sets plain global variables. A border style is a set of switches (style_setup), so a new style is
+# one case there plus the stage that draws it.
+# =====================================================================================================
 
-  # Size everything relative to the image (after applying EXIF rotation)
-  read -r W H < <(magick "$in" -auto-orient -format "%w %h\n" info:)
-  S=$(( W < H ? W : H ))
-  u() { echo $(( S * $1 / 1000 )); }   # tenths of a percent of the short side
-  B=$(u 30)                     # top/side border
-  BOT=$(u 130)                  # bottom strip height
-  PT=$(u 40)                    # title font size
-  PS=$(u 17)                    # all other text
-  LOGO_H=$(u 18)                # visible height of a wide wordmark (padding trimmed); squarer logos get more
-  # Baselines, measured up from the bottom edge. The title's top lines up with the logo's top,
-  # the place/date line shares a baseline with the settings line.
-  Y_TITLE=$(u 66); Y_CAM=$(u 62); Y_LOGO=$(u 88); Y_LOW=$(u 36)
-  # Contact sheet: room for film-edge printing in a taller top border.
-  # The maker moves into the edge print, so there's no logo: two lines a side in a lower strip, with
-  # camera/lens on the title's baseline and the settings on the place/date baseline.
-  TOPB=$B; EB=0; SHOW_LOGO=1
-  if [[ "$BORDER" == contact ]]; then
-    TOPB=$(( 2 * B )); EB=0; SHOW_LOGO=0
-    # One text size throughout, so both sides mirror each other (bright line over dim line), and an
-    # equal margins above and below the two lines
-    PS=$(u 22); PT=$PS; BOT=$(u 110); Y_TITLE=$(u 64); Y_CAM=$(u 64); Y_LOW=$(u 30)
-    Y_TITLE=$(( Y_TITLE + EB )); Y_CAM=$(( Y_CAM + EB )); Y_LOW=$(( Y_LOW + EB ))
-  fi
+u() { echo $(( S * $1 / 1000 )); }   # tenths of a percent of the photo's short side
 
+# --- Style switches, from -b (the same for every photo in a run)
+#   KIND     background: solid | gradient | frost | material | film
+#   INSET    photo and lettering cut into the surface (stone)
+#   LOGO_ON  maker logo above the camera info
+#   FILM     contact-sheet layout: edge print, one condensed uppercase size, no logo
+style_setup() {
+  KIND=solid; INSET=0; LOGO_ON=1; FILM=0
+  case "$BORDER" in
+    frost|frost-dark) KIND=frost ;;
+    marble|marble-dark|marble-green|marble-beige|terrazzo) KIND=material; INSET=1 ;;
+    linen) KIND=material ;;
+    contact) KIND=film; LOGO_ON=0; FILM=1 ;;
+    auto) ;;
+    *) if [[ "$(pastel "$BORDER")" == *-* ]]; then KIND=gradient; fi ;;   # "colour1-colour2"
+  esac
+}
+
+# --- 1. Metadata: text lines and maker logo
+read_meta() {
   make=$(exiftool -s3 -Make "$in")
   model=$(exiftool -s3 -Model "$in")
   # LensID (exiftool's offline lens database) first; fall back to the raw EXIF LensModel,
   # adding the space some makers omit between focal length and aperture ("18-55mmF2.8" -> "18-55mm F2.8")
   lens=$(exiftool -s3 -LensID "$in")
-  [[ -z "$lens" || "$lens" == Unknown* ]] &&
+  if [[ -z "$lens" || "$lens" == Unknown* ]]; then
     lens=$(exiftool -s3 -LensModel "$in" | sed -E 's/([0-9])mm ?([Ff]\/?[0-9])/\1mm \2/')
-  info=$(exiftool -f -p "\${FocalLength;s/\\.0//} $SEP ƒ/\$FNumber $SEP \${ExposureTime}s $SEP ISO \$ISO" "$in")
+  fi
+  # Settings line from whatever the photo has ("35.8 mm ∙ ƒ/11.0 ∙ 1/340s ∙ ISO 200"); missing values are
+  # left out. The contact sheet prints the ISO in the film edge instead.
+  local fl fn et iso parts=()
+  fl=$(exiftool -s3 -FocalLength "$in" | sed 's/\.0//'); fn=$(exiftool -s3 -FNumber "$in")
+  et=$(exiftool -s3 -ExposureTime "$in"); iso=$(exiftool -s3 -ISO "$in")
+  [[ -n "$fl" ]] && parts+=( "$fl" )
+  [[ -n "$fn" ]] && parts+=( "ƒ/$fn" )
+  [[ -n "$et" ]] && parts+=( "${et}s" )
+  if [[ -n "$iso" ]] && (( ! FILM )); then parts+=( "ISO $iso" ); fi
+  info=""
+  for p in ${parts[@]+"${parts[@]}"}; do info="${info:+$info $SEP }$p"; done
   camera="$model${lens:+ $SEP $lens}"
-  [[ "$BORDER" == contact ]] && info="${info% $SEP ISO *}"   # contact prints the ISO in the film edge instead
 
   # Title: Title tag, else City, else the file name. The line below shows city and date,
   # minus the city when it's already the title.
@@ -363,7 +373,7 @@ for in in "$@"; do
   title=$(exiftool -s3 -Title "$in")
   place="$city"
   if [[ -z "$title" && -n "$city" ]]; then title="$city"; place=""; fi
-  [[ -z "$title" ]] && { title=$(basename "$in"); title="${title%.*}"; }
+  if [[ -z "$title" ]]; then title=$(basename "$in"); title="${title%.*}"; fi
   sub="$place${place:+${date:+ $SEP }}$date"
 
   # "NIKON CORPORATION" -> nikon, "FUJIFILM" -> fujifilm, etc. Newer Pentax bodies report
@@ -374,18 +384,51 @@ for in in "$@"; do
   if [[ "$key" == apple ]]; then          # iPhone / iPad have their own wordmarks
     case "$model" in iPhone*) key=iphone ;; iPad*) key=ipad ;; esac
   fi
-  logo="$LOGO_DIR/$key.png"
-  if (( SHOW_LOGO )); then
-    [[ -n "$key" ]] && fetch_logo "$key"
-  else
-    logo=""
+  logo=""
+  if (( LOGO_ON )); then
+    logo="$LOGO_DIR/$key.png"
+    if [[ -n "$key" ]]; then fetch_logo "$key"; fi
   fi
+  return 0
+}
+
+# --- 2. Layout: everything sized from the photo's short side (after EXIF rotation)
+layout() {
+  read -r W H < <(magick "$in" -auto-orient -format "%w %h\n" info:)
+  S=$(( W < H ? W : H ))
+  B=$(u 30)                     # side border; also the top border, except on the contact sheet
+  BOT=$(u 130)                  # bottom strip height
+  PT=$(u 40)                    # title font size
+  PS=$(u 17)                    # all other text
+  LOGO_H=$(u 18)                # visible height of a wide wordmark (padding trimmed); squarer logos get more
+  # Baselines, measured up from the bottom edge. The title's top lines up with the logo's top,
+  # the place/date line shares a baseline with the settings line.
+  Y_TITLE=$(u 66); Y_CAM=$(u 62); Y_LOGO=$(u 88); Y_LOW=$(u 36)
+  TOPB=$B
+  if (( FILM )); then
+    # Contact sheet: a taller top border for the edge print, and one text size throughout so both sides
+    # mirror each other (bright line over dim line), with equal margins above and below the two lines
+    TOPB=$(( 2 * B ))
+    PS=$(u 22); PT=$PS; BOT=$(u 110); Y_TITLE=$(u 64); Y_CAM=$(u 64); Y_LOW=$(u 30)
+  fi
+  FW=$(( W + 2*B )); FH=$(( H + TOPB + BOT ))
+
   # Optical sizing: a square badge at a wordmark's height looks tiny, so logos narrower than ~5:1 grow
   # with the square root of how much squarer they are, up to 1.6x (what fits above the camera line)
   LH=$LOGO_H
-  [[ -f "$logo" ]] && LH=$(magick "$logo" -trim -format "%[fx:w/h]" info: |
-    awk -v h=$LOGO_H '{ f = sqrt(5 / $1); if (f < 1) f = 1; if (f > 1.6) f = 1.6; printf "%d", h * f }')
+  if [[ -f "$logo" ]]; then
+    LH=$(magick "$logo" -trim -format "%[fx:w/h]" info: |
+      awk -v h=$LOGO_H '{ f = sqrt(5 / $1); if (f < 1) f = 1; if (f > 1.6) f = 1.6; printf "%d", h * f }')
+  fi
+  return 0
+}
 
+# Text width at a given size (terrazzo's keep-clear boxes), and the largest of several numbers
+text_w() { magick -font "$FONT" -pointsize "$1" label:"$2" -format "%w" info:; }
+max() { printf "%s\n" "$@" | sort -n | tail -1; }
+
+# --- 3. Background: the full-size canvas the photo is placed on (lets gradients span the whole frame)
+background() {
   # Border colour; "auto" = the photo's average colour, lifted to a light pastel
   if [[ "$BORDER" == auto ]]; then
     BG=$(magick "$in" -resize 1x1\! -colorspace HSL -channel G -evaluate multiply 1.4 \
@@ -393,65 +436,64 @@ for in in "$@"; do
   else
     BG=$(pastel "$BORDER")
   fi
-  FW=$(( W + 2*B )); FH=$(( H + TOPB + BOT + EB ))
   shadow=()
-  if [[ "$BG" == frost || "$BG" == frost-dark ]]; then
-    # Frosted glass: the photo stretched to fill the frame, blurred (cheaply, at 1/16 size), washed with a
-    # tint so text stays readable, plus fine grain for the frosted texture
-    [[ "$BG" == frost ]] && tint=( -fill white -colorize 55% ) || tint=( -fill black -colorize 50% )
-    sw=$(( FW / 16 )); sh=$(( FH / 16 ))
-    canvas=( \( "$in" -auto-orient -resize ${sw}x${sh}^ -gravity center -extent ${sw}x${sh} -blur 0x4
-                 -resize ${FW}x${FH}\! "${tint[@]}" -attenuate 0.2 +noise Gaussian \) )
-    # Soft drop shadow under the photo so it floats above the glass (also built small and scaled up)
-    sp=$(( B / 32 + 1 ))
-    shadow=( \( -size $(( W / 16 ))x$(( H / 16 )) "xc:rgba(0,0,0,0.35)" -bordercolor none -border $(( 2*sp ))
-                 -blur 0x$sp -resize $(( W + 64*sp ))x$(( H + 64*sp ))\! \)
-             -gravity northwest -geometry $(printf "%+d%+d" $(( B - 32*sp )) $(( B - 32*sp + B/6 ))) -composite )
-  elif [[ "$BG" == marble || "$BG" == marble-dark || "$BG" == marble-green || "$BG" == marble-beige ||
-        "$BG" == terrazzo || "$BG" == linen ]]; then
-    if [[ "$BG" == terrazzo ]]; then
-      # Keep chips off the text: measure both text blocks (plus the logo) and pass them as keep-clear boxes
-      tw() { magick -font "$FONT" -pointsize "$1" label:"$2" -format "%w" info:; }
-      max() { printf "%s\n" "$@" | sort -n | tail -1; }
-      lw=$(max "$(tw $PT "$title")" "$( [[ -n "$sub" ]] && tw $PS "$sub" || echo 0 )")
-      logo_w=0
-      [[ -f "$logo" ]] && logo_w=$(magick "$logo" -trim -format "%[fx:round(w*$LH/h)]" info:)
-      rw=$(max "$(tw $PS "$camera")" "$(tw $PS "$info")" "$logo_w")
-      pad=$(( PS / 2 )); top=$(( FH - Y_LOGO - LH - pad )); bot=$(( FH - Y_LOW + PS / 2 ))
-      CLEAR="$(( B - pad )),$top,$(( B + lw + pad )),$bot $(( FW - B - rw - pad )),$top,$(( FW - B + pad )),$bot"
-    fi
-    material "$BG" $FW $FH "$TMP/material.miff"
-    canvas=( "$TMP/material.miff" )
-  elif [[ "$BG" == contact ]]; then
-    canvas=( "xc:#111111" )
-  elif [[ "$BG" == *-* ]]; then
-    # "colour1-colour2" is a diagonal gradient
-    canvas=( -define gradient:angle=135 "gradient:$BG" )
-  else
-    canvas=( "xc:$BG" )
-  fi
+  case "$KIND" in
+    frost)
+      # Frosted glass: the photo stretched to fill the frame, blurred (cheaply, at 1/16 size), washed with a
+      # tint so text stays readable, plus fine grain for the frosted texture
+      local tint sw sh sp
+      if [[ "$BG" == frost ]]; then tint=( -fill white -colorize 55% ); else tint=( -fill black -colorize 50% ); fi
+      sw=$(( FW / 16 )); sh=$(( FH / 16 ))
+      canvas=( \( "$in" -auto-orient -resize ${sw}x${sh}^ -gravity center -extent ${sw}x${sh} -blur 0x4
+                   -resize ${FW}x${FH}\! "${tint[@]}" -attenuate 0.2 +noise Gaussian \) )
+      # Soft drop shadow under the photo so it floats above the glass (also built small and scaled up)
+      sp=$(( B / 32 + 1 ))
+      shadow=( \( -size $(( W / 16 ))x$(( H / 16 )) "xc:rgba(0,0,0,0.35)" -bordercolor none -border $(( 2*sp ))
+                   -blur 0x$sp -resize $(( W + 64*sp ))x$(( H + 64*sp ))\! \)
+               -gravity northwest -geometry $(printf "%+d%+d" $(( B - 32*sp )) $(( B - 32*sp + B/6 ))) -composite ) ;;
+    material)
+      if [[ "$BG" == terrazzo ]]; then
+        # Keep chips off the text: measure both text blocks (plus the logo) and pass them as keep-clear boxes
+        local lw rw logo_w=0 pad top bot
+        lw=$(max "$(text_w $PT "$title")" "$( [[ -n "$sub" ]] && text_w $PS "$sub" || echo 0 )")
+        if [[ -f "$logo" ]]; then logo_w=$(magick "$logo" -trim -format "%[fx:round(w*$LH/h)]" info:); fi
+        rw=$(max "$(text_w $PS "$camera")" "$(text_w $PS "$info")" "$logo_w")
+        pad=$(( PS / 2 )); top=$(( FH - Y_LOGO - LH - pad )); bot=$(( FH - Y_LOW + PS / 2 ))
+        CLEAR="$(( B - pad )),$top,$(( B + lw + pad )),$bot $(( FW - B - rw - pad )),$top,$(( FW - B + pad )),$bot"
+      fi
+      material "$BG" $FW $FH "$TMP/material.miff"
+      canvas=( "$TMP/material.miff" ) ;;
+    film)     canvas=( "xc:#111111" ) ;;
+    gradient) canvas=( -define gradient:angle=135 "gradient:$BG" ) ;;   # diagonal, top-left -> bottom-right
+    *)        canvas=( "xc:$BG" ) ;;
+  esac
+  return 0
+}
 
-  # Text and logo colours follow the border's average brightness; secondary text is translucent so it picks up the tint
-  if [[ "$BG" == frost* ]]; then
-    lum=$([[ "$BG" == frost ]] && echo 0.9 || echo 0.1)   # the tint dominates; skip rendering the full canvas twice
-  elif [[ "${canvas[0]}" == "$TMP/material.miff" ]]; then
-    lum=$(magick "$TMP/material.miff" -resize 1x1\! -format "%[fx:luminance]" info:)
-  else
-    lum=$(magick -size 64x64 "${canvas[@]}" -resize 1x1\! -format "%[fx:luminance]" info:)
-  fi
+# --- 4. Ink: text and logo colours follow the border's average brightness; secondary text is
+# translucent so it picks up the tint. The contact sheet prints everything in amber.
+ink() {
+  local lum
+  case "$KIND" in
+    frost)    if [[ "$BG" == frost ]]; then lum=0.9; else lum=0.1; fi ;;   # the tint dominates; skip rendering the canvas
+    material) lum=$(magick "$TMP/material.miff" -resize 1x1\! -format "%[fx:luminance]" info:) ;;
+    *)        lum=$(magick -size 64x64 "${canvas[@]}" -resize 1x1\! -format "%[fx:luminance]" info:) ;;
+  esac
   if (( $(awk -v l="$lum" 'BEGIN { print (l < 0.5) }') )); then
     DARK=1; FG="#EEEEEE"; FG2="rgba(255,255,255,0.6)"
   else
     DARK=0; FG="#222222"; FG2="rgba(0,0,0,0.5)"
   fi
-  [[ "$BG" == contact ]] && { FG="$AMBER"; FG2="rgba(242,177,52,0.6)"; }
+  if (( FILM )); then FG="$AMBER"; FG2="rgba(242,177,52,0.6)"; fi
+  return 0
+}
 
-  # Paper texture for solid/gradient borders: directional fibres + faint large-scale mottling, embossed
-  # into a grey relief map and hard-light blended (so it shows on pure white as well as on dark colours)
-  # (materials already have their own surface, so they're skipped)
-  if [[ "$BG" != frost* && "$BG" != contact && "${canvas[0]}" != "$TMP/material.miff" ]] && (( PAPER > 0 )); then
-    # Built at half size and scaled up: ~3x faster, and the grain is soft enough that it doesn't show
-    hw=$(( FW / 2 )); hh=$(( FH / 2 ))
+# --- 5. Paper texture for solid/gradient borders: directional fibres + faint large-scale mottling,
+# embossed into a grey relief map and hard-light blended (so it shows on pure white as well as on dark
+# colours). Built at half size and scaled up: ~3x faster, and the grain is soft enough that it doesn't show.
+paper() {
+  if [[ "$KIND" == solid || "$KIND" == gradient ]] && (( PAPER > 0 )); then
+    local hw=$(( FW / 2 )) hh=$(( FH / 2 ))
     canvas+=( \( -size ${hw}x${hh} xc:gray50 -attenuate 1 +noise Gaussian -colorspace gray
                   -motion-blur 0x$(awk -v s=$S 'BEGIN { printf "%.1f", s / 3000 }')+30
                   \( -size $(( FW / 40 ))x$(( FH / 40 )) xc:gray50 -attenuate 1 +noise Gaussian -colorspace gray
@@ -459,19 +501,18 @@ for in in "$@"; do
                   -shade 120x55 -auto-level +level $(( 50 - PAPER ))%,$(( 50 + PAPER ))% -resize ${FW}x${FH}\! \)
               -compose hardlight -composite -compose over )
   fi
+  return 0
+}
 
-  # Draw the border as a full-size canvas and place the photo on it (lets gradients span the whole frame)
+# --- 6. Photo on the canvas; on stone it's recessed: an inner shadow over its top and left edges (built
+# at 1/8 size and scaled up), a shadow line on the stone's cut edge above/left, and a highlight where
+# light catches it below/right
+place_photo() {
   args=( -size ${FW}x${FH} "${canvas[@]}" ${shadow[@]+"${shadow[@]}"}
          \( "$in" -auto-orient \) -gravity northwest -geometry +$B+$TOPB -composite )
-
-  # Stone borders: photo and lettering look cut into the stone, lit from the top-left
-  INSET=0
-  [[ "$BG" == marble || "$BG" == marble-dark || "$BG" == marble-green || "$BG" == marble-beige ||
-     "$BG" == terrazzo ]] && INSET=1
   if (( INSET )); then
-    # Recessed photo: inner shadow over its top and left edges (built at 1/8 size and scaled up), a
-    # shadow line on the stone's cut edge above/left, and a highlight where light catches it below/right
-    sc=8; sw=$(( W / sc )); sh=$(( H / sc )); d=$(( B / 6 / sc + 1 )); sg=$(( B / 5 / sc + 1 )); lw=$(( B / 40 + 1 ))
+    local sc=8 sw sh d sg lw
+    sw=$(( W / sc )); sh=$(( H / sc )); d=$(( B / 6 / sc + 1 )); sg=$(( B / 5 / sc + 1 )); lw=$(( B / 40 + 1 ))
     args+=( \( -size ${W}x${H} xc:black
                \( -size ${sw}x${sh} xc:white -fill black -draw "rectangle $d,$d $(( sw + 3*sg )),$(( sh + 3*sg ))"
                   -blur 0x$sg -resize ${W}x${H}\! -evaluate multiply 0.6 \)
@@ -484,90 +525,100 @@ for in in "$@"; do
             -draw "rectangle $B,$(( B + H )) $(( B + W + lw - 1 )),$(( B + H + lw - 1 ))"
             -draw "rectangle $(( B + W )),$B $(( B + W + lw - 1 )),$(( B + H + lw - 1 ))" )
   fi
+  return 0
+}
 
-  # Text. Engraved on stone: a shadow copy nudged up-left and a highlight copy nudged down-right go first.
-  text() {  # dx dy (screen px, right/down) primary-fill secondary-fill
-    local dx=$1 dy=$2
-    args+=( -gravity southwest -pointsize "$PT" -fill "$3" -annotate +$(( B + dx ))+$(( Y_TITLE - dy )) "$title"
-                               -pointsize "$PS" -fill "$4" -annotate +$(( B + dx ))+$(( Y_LOW - dy ))   "$sub"
-            -gravity southeast -pointsize "$PS" -fill "$3" -annotate +$(( B - dx ))+$(( Y_CAM - dy ))   "$camera"
-                               -pointsize "$PS" -fill "$4" -annotate +$(( B - dx ))+$(( Y_LOW - dy ))   "$info" )
-  }
-  o=$(( PS / 22 + 1 ))
-  TFONT="$FONT"
-  if [[ "$BG" == contact ]]; then
-    # Film-edge look: everything in uppercase DIN Condensed, like the edge print (ƒ stays lowercase —
-    # the font has no capital Ƒ)
-    TFONT="$FONT_COND"
-    up() { perl -CS -Mutf8 -pe '$_ = uc; s/Ƒ/ƒ/g' <<<"$1"; }
-    title=$(up "$title"); sub=$(up "$sub"); camera=$(up "$camera"); info=$(up "$info")
+# --- 7. Text: title and place/date on the left, camera and settings on the right.
+# Engraved on stone: a shadow copy nudged up-left and a highlight copy nudged down-right go first.
+text_layer() {  # dx dy (screen px, right/down) primary-fill secondary-fill
+  local dx=$1 dy=$2
+  args+=( -gravity southwest -pointsize "$PT" -fill "$3" -annotate +$(( B + dx ))+$(( Y_TITLE - dy )) "$title"
+                             -pointsize "$PS" -fill "$4" -annotate +$(( B + dx ))+$(( Y_LOW - dy ))   "$sub"
+          -gravity southeast -pointsize "$PS" -fill "$3" -annotate +$(( B - dx ))+$(( Y_CAM - dy ))   "$camera"
+                             -pointsize "$PS" -fill "$4" -annotate +$(( B - dx ))+$(( Y_LOW - dy ))   "$info" )
+}
+upper() { perl -CS -Mutf8 -pe '$_ = uc; s/Ƒ/ƒ/g' <<<"$1"; }   # (ƒ stays lowercase: DIN Condensed has no Ƒ)
+
+add_text() {
+  local tfont="$FONT"
+  o=$(( PS / 22 + 1 ))          # engraving offset (also used for the logo)
+  if (( FILM )); then
+    # Film-edge look: everything in uppercase DIN Condensed, like the edge print
+    tfont="$FONT_COND"
+    title=$(upper "$title"); sub=$(upper "$sub"); camera=$(upper "$camera"); info=$(upper "$info")
   fi
-  args+=( -font "$TFONT" )
+  args+=( -font "$tfont" )
   if (( INSET )); then
-    text -$o -$o "rgba(0,0,0,0.45)" "rgba(0,0,0,0.3)"
-    text  $o  $o "rgba(255,255,255,0.55)" "rgba(255,255,255,0.35)"
+    text_layer -$o -$o "rgba(0,0,0,0.45)" "rgba(0,0,0,0.3)"
+    text_layer  $o  $o "rgba(255,255,255,0.55)" "rgba(255,255,255,0.35)"
   fi
-  text 0 0 "$FG" "$FG2"
+  text_layer 0 0 "$FG" "$FG2"
+  return 0
+}
 
-  if [[ -f "$logo" ]]; then
-    # On dark borders turn the logo's black parts white but keep coloured accents (Fuji's red I).
-    # Each pixel is treated as a mix of accent colour and black (estimated from its chroma) and only the
-    # black share is lifted to white, so antialiased edges blend smoothly instead of leaving dark specks.
-    # Logos that bring their own background (Nikon's yellow band) are left as they are.
-    recolour=()
-    (( DARK )) && [[ "$key" != nikon ]] && recolour=( -channel RGB
+# --- 8. Logo, on top of the camera info.
+# On dark borders the logo's black parts turn white but coloured accents stay (Fuji's red I): each pixel
+# is treated as a mix of accent colour and black (estimated from its chroma) and only the black share is
+# lifted to white, so antialiased edges blend smoothly instead of leaving dark specks. Logos that bring
+# their own background (Nikon's yellow band) are left as they are.
+add_logo() {
+  [[ -f "$logo" ]] || return 0
+  local recolour=()
+  if (( DARK )) && [[ "$key" != nikon ]]; then
+    recolour=( -channel RGB
       -fx "chroma=max(max(u.r,u.g),u.b)-min(min(u.r,u.g),u.b); accent=min(1,chroma/0.75); min(1,u+1-accent)"
       +channel )
-    [[ "$BG" == contact && "$key" != nikon ]] && recolour+=( -channel R -evaluate multiply 0.949
-      -channel G -evaluate multiply 0.694 -channel B -evaluate multiply 0.204 +channel )   # x amber
-    # Fully transparent pixels can hide stray RGB (green-grey in fujifilm.png) that resizing bleeds into
-    # the edges — reset it to black first
-    # Trim the PNG's transparent padding so the logo is placed by its visible letters, on top of the camera info
-    # (-colorspace sRGB: some logos are greyscale PNGs, which have no separate channels to tint)
-    magick "$logo" -trim +repage -background black -alpha background -colorspace sRGB -resize x"$LH" \
-      ${recolour[@]+"${recolour[@]}"} "$TMP/logo.miff"
-    if (( INSET )); then   # engraved like the text: tinted silhouettes nudged up-left and down-right
-      args+=( \( "$TMP/logo.miff" -fill black -colorize 100 -channel A -evaluate multiply 0.45 +channel \)
-              -gravity southeast -geometry +$(( B + o ))+$(( Y_LOGO + o )) -composite
-              \( "$TMP/logo.miff" -fill white -colorize 100 -channel A -evaluate multiply 0.55 +channel \)
-              -gravity southeast -geometry +$(( B - o ))+$(( Y_LOGO - o )) -composite )
-    fi
-    args+=( "$TMP/logo.miff" -gravity southeast -geometry +$B+$Y_LOGO -composite )
   fi
-
-  # Contact sheet edge print: film name, then ▶ n, ▶ nA, ▶ n+1 like the markings on a film strip,
-  # along the top border
-  if [[ "$BG" == contact ]]; then
-    # Like the stock name on real film: maker, film simulation (if any), speed —
-    # "FUJIFILM PROVIA ISO 200", "SONY ISO 200"
-    case "$key" in
-      om) maker="OM SYSTEM" ;; iphone|ipad) maker="APPLE" ;;
-      *) maker=$(tr '[:lower:]' '[:upper:]' <<<"$key") ;;
-    esac
-    iso=$(exiftool -s3 -ISO "$in")
-    film=$(echo $maker $(film_name "$in") ${iso:+ISO $iso})   # (echo joins the non-empty parts)
-    num=$(basename "${in%.*}" | { grep -oE '[0-9]+' || true; } | tail -1)   # frame number: last number in the file name
-    [[ -n "$num" ]] && n=$(( 10#$num )) || n=$idx
-    PE=$PS; TRI=$(( PE * 60 / 100 ))                          # same size as the other text; triangle size
-    edge() {  # y = centre of the row, measured from the top
-      local y=$1 base=$(( FH - $1 - PE * 50 / 100 )) x t
-      args+=( -fill "$AMBER" -stroke none -font "$FONT_COND" -pointsize $PE -gravity southwest
-              -annotate +$B+$(( base - PE * 18 / 100 )) "$film" )
-      for t in "30:$n" "58:${n}A" "84:$(( n + 1 ))"; do
-        x=$(( FW * ${t%%:*} / 100 ))
-        args+=( -draw "polygon $x,$(( y - TRI / 2 )) $(( x + TRI )),$y $x,$(( y + TRI / 2 ))"
-                -annotate +$(( x + TRI * 16 / 10 ))+$(( base - PE * 18 / 100 )) "${t#*:}" )
-      done
-    }
-    edge $(( B * 85 / 100 ))
+  if (( FILM )) && [[ "$key" != nikon ]]; then
+    recolour+=( -channel R -evaluate multiply 0.949 -channel G -evaluate multiply 0.694
+                -channel B -evaluate multiply 0.204 +channel )   # x amber
   fi
+  # Trim the PNG's transparent padding so the logo is placed by its visible letters. Fully transparent
+  # pixels can hide stray RGB (green-grey in fujifilm.png) that resizing bleeds into the edges — reset it
+  # to black first. (-colorspace sRGB: some logos are greyscale PNGs, which have no channels to tint.)
+  magick "$logo" -trim +repage -background black -alpha background -colorspace sRGB -resize x"$LH" \
+    ${recolour[@]+"${recolour[@]}"} "$TMP/logo.miff"
+  if (( INSET )); then   # engraved like the text: tinted silhouettes nudged up-left and down-right
+    args+=( \( "$TMP/logo.miff" -fill black -colorize 100 -channel A -evaluate multiply 0.45 +channel \)
+            -gravity southeast -geometry +$(( B + o ))+$(( Y_LOGO + o )) -composite
+            \( "$TMP/logo.miff" -fill white -colorize 100 -channel A -evaluate multiply 0.55 +channel \)
+            -gravity southeast -geometry +$(( B - o ))+$(( Y_LOGO - o )) -composite )
+  fi
+  args+=( "$TMP/logo.miff" -gravity southeast -geometry +$B+$Y_LOGO -composite )
+}
 
-  # Optional final downscale (long side), done last so text and logo are rendered at full resolution.
-  # fit = back to the original's long edge
-  long="$LONG"; [[ "$SIZE" == fit ]] && long=$(( W > H ? W : H ))
-  [[ -n "$long" ]] && args+=( -resize "${long}x${long}>" )
+# --- 9. Contact sheet edge print along the top border: the film stock like on real film — maker, film
+# simulation (if any), speed: "FUJIFILM PROVIA ISO 200", "SONY ISO 200" — then ▶ n, ▶ nA, ▶ n+1
+add_edge_print() {
+  (( FILM )) || return 0
+  local maker iso film num n pe tri y base x t
+  case "$key" in
+    om) maker="OM SYSTEM" ;; iphone|ipad) maker="APPLE" ;;
+    *) maker=$(tr '[:lower:]' '[:upper:]' <<<"$key") ;;
+  esac
+  iso=$(exiftool -s3 -ISO "$in")
+  film=$(echo $maker $(film_name "$in") ${iso:+ISO $iso})   # (echo joins the non-empty parts)
+  num=$(basename "${in%.*}" | { grep -oE '[0-9]+' || true; } | tail -1)   # frame number: last number in the file name
+  if [[ -n "$num" ]]; then n=$(( 10#$num )); else n=$idx; fi
+  pe=$PS; tri=$(( pe * 60 / 100 ))                          # same size as the other text; triangle size
+  y=$(( B * 85 / 100 )); base=$(( FH - y - pe * 50 / 100 ))  # y = centre of the row, from the top
+  args+=( -fill "$AMBER" -stroke none -font "$FONT_COND" -pointsize $pe -gravity southwest
+          -annotate +$B+$(( base - pe * 18 / 100 )) "$film" )
+  for t in "30:$n" "58:${n}A" "84:$(( n + 1 ))"; do
+    x=$(( FW * ${t%%:*} / 100 ))
+    args+=( -draw "polygon $x,$(( y - tri / 2 )) $(( x + tri )),$y $x,$(( y + tri / 2 ))"
+            -annotate +$(( x + tri * 16 / 10 ))+$(( base - pe * 18 / 100 )) "${t#*:}" )
+  done
+}
 
-  magick "${args[@]}" -quality 95 "$out"
+# --- 10. Render and write: optional final downscale (long side; fit = back to the original's long
+# edge), done last so text and logo are rendered at full resolution; then the metadata
+write_out() {
+  local long="$LONG"
+  if [[ "$SIZE" == fit ]]; then long=$(( W > H ? W : H )); fi
+  if [[ -n "$long" ]]; then args+=( -resize "${long}x${long}>" ); fi
+
+  mg "${args[@]}" -quality 95 "$out"
 
   if [[ "$META" == keep ]]; then
     # Copy metadata back, minus Orientation (pixels are already rotated) and the original's pixel dimensions
@@ -575,8 +626,28 @@ for in in "$@"; do
       --ExifImageWidth --ExifImageHeight "$out"
   else
     # Strip everything, but keep the colour profile so colours still display correctly
-    exiftool -q -q -m -overwrite_original -all= -TagsFromFile "$in" -ICC_Profile "$out"   # (-q -q: no warning when there is no profile)
+    # (-q -q: no warning when there is no profile)
+    exiftool -q -q -m -overwrite_original -all= -TagsFromFile "$in" -ICC_Profile "$out"
   fi
   echo "→ $out"
+}
+
+frame_photo() {
+  read_meta; layout; background; ink; paper; place_photo; add_text; add_logo; add_edge_print; write_out
+}
+
+# =====================================================================================================
+# Main loop
+# =====================================================================================================
+style_setup
+# Output name: <photo>_<border>_<size>.jpg, border made file-name safe ("#FFD6E0-#B5E2FA" -> FFD6E0-B5E2FA,
+# "rgb(40,60,90)" -> rgb40-60-90)
+tag=$(sed -E 's/[#()]//g; s/[^A-Za-z0-9.-]+/-/g; s/^-+|-+$//g' <<<"$BORDER")
+status=0; idx=0
+for in in "$@"; do
+  idx=$(( idx + 1 ))
+  if [[ ! -f "$in" ]]; then echo "$ME: no such file: $in (skipped)" >&2; status=1; continue; fi
+  out="${in%.*}_${tag}_${SIZE}.jpg"
+  frame_photo
 done
 exit $status
