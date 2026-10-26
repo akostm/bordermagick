@@ -64,5 +64,31 @@ make_photos "$OUT/photos"
 check "tags of the test photos" "$(cat "$HERE/tags.expected")" \
   "$(cd "$OUT/photos" && "$ROOT/bordermagick" --tags fuji_33.jpg no_exif.jpg sony_portrait.jpg)"
 
+# --- Text from metadata reaches ImageMagick as it is: no @file reads, no backslash or % escapes
+eval "$(grep '^im_text()' "$ROOT/bordermagick")"
+esc() { check "im_text $1" "$2" "$(im_text "$1")"; }
+esc 'Erechtheion' 'Erechtheion'
+esc '@f.txt'      '\@f.txt'
+esc 'a@b'         'a@b'
+esc 'a\b'         'a\\b'
+esc '\@x'         '\\@x'
+esc '100% %w'     '100%% %%w'
+# A photo titled "@file" (and with "@file" as its city) frames the same whether that file exists or not,
+# in every way text is drawn: -annotate (white), label: (museum, postcard), caption: (poster)
+at="$OUT/at"; rm -rf "$at"; mkdir -p "$at/with" "$at/without"
+cp "$OUT/photos/fuji_33.jpg" "$at/at.jpg"
+exiftool -q -overwrite_original "-XMP:Title=@$at/secret.txt" "-XMP:City=@$at/secret.txt" \
+  -DateTimeOriginal= -CreateDate= -ModifyDate= "$at/at.jpg"   # (no date: the poster's place column is just "@file")
+for b in white museum poster postcard; do
+  echo "LEAKED FILE CONTENTS" > "$at/secret.txt"
+  cp "$at/at.jpg" "$at/with/at.jpg"; cp "$at/at.jpg" "$at/without/at.jpg"
+  BORDERMAGICK_SEED=42 "$ROOT/bordermagick" -b $b "$at/with/at.jpg" >/dev/null 2>&1
+  rm "$at/secret.txt"
+  BORDERMAGICK_SEED=42 "$ROOT/bordermagick" -b $b "$at/without/at.jpg" >/dev/null 2>&1
+  ae=$(magick compare -metric AE "$at"/with/at_*_*.jpg "$at"/without/at_*_*.jpg null: 2>&1 | awk '{print $1}')
+  check "@file title, -b $b" 0 "$ae"
+  rm -f "$at"/with/at_*_*.jpg "$at"/without/at_*_*.jpg
+done
+
 echo "$pass passed, $fail failed"
 (( fail == 0 ))

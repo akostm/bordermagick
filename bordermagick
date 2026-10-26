@@ -119,7 +119,7 @@ pastel() {  # name -> hex for the Instax-style presets; anything else passes thr
 }
 
 ME=$(basename "$0")
-VERSION="1.2.1"
+VERSION="1.2.2"
 help() {
   cat <<HELP
 $ME — frame photos with a border, title, camera info and maker logo
@@ -425,13 +425,13 @@ poster_layout() {
   # the last line and would clip descenders and underscores, so a blank line is added and trimmed away.)
   pt=$(pu 110)
   magick -background none -fill "$PINK" -font HelveticaNeue-Bold -pointsize $pt -kerning $(( -pt / 40 )) \
-    -interline-spacing $(( -pt * 18 / 100 )) -size $(( sw - 2 * m ))x caption:"$title"$'\n'" " -trim +repage "$TMP/ptitle.miff"
+    -interline-spacing $(( -pt * 18 / 100 )) -size $(( sw - 2 * m ))x caption:"$(im_text "$title")"$'\n'" " -trim +repage "$TMP/ptitle.miff"
   # Grid: place and date | camera and lens (widest) | exposure; long lines wrap within their column
   PPS=$(pu 22); cw1=$(( (sw - 2 * m) * 28 / 100 )); cw2=$(( (sw - 2 * m) * 44 / 100 )); cw3=$(( sw - 2 * m - cw1 - cw2 ))
   pcol() {  # width text out (an empty column becomes a blank 1-pixel image)
     if [[ -z "$2" ]]; then magick -size 1x1 xc:none "$3"; return; fi
     magick -background none -fill "$PINK" -font HelveticaNeue-Medium -pointsize $PPS \
-      -interline-spacing $(( PPS / 4 )) -size $(( $1 - PPS ))x caption:"$2" "$3"
+      -interline-spacing $(( PPS / 4 )) -size $(( $1 - PPS ))x caption:"$(im_text "$2")" "$3"
   }
   pcol $cw1 "$(printf '%s\n%s' "$place" "$date" | sed '/^$/d')" "$TMP/pc1.miff"
   pcol $cw2 "$(printf '%s\n%s' "$T_body" "$lens" | sed '/^$/d')" "$TMP/pc2.miff"
@@ -487,8 +487,13 @@ layout() {
   return 0
 }
 
+# Text from metadata and file names as ImageMagick text: label:, caption: and -annotate read a leading @
+# as a file name, and turn backslash and percent escapes into other text. Double every backslash and %,
+# and escape a leading @, so the text prints as it is.
+im_text() { local t=${1//\\/\\\\}; t=${t//%/%%}; [[ "$t" == @* ]] && t="\\$t"; printf '%s' "$t"; }
+
 # Text width at a given size (terrazzo's keep-clear boxes), and the largest of several numbers
-text_w() { magick -font "$FONT" -pointsize "$1" label:"$2" -format "%w" info:; }
+text_w() { magick -font "$FONT" -pointsize "$1" label:"$(im_text "$2")" -format "%w" info:; }
 max() { printf "%s\n" "$@" | sort -n | tail -1; }
 
 # --- 3. Background: the full-size canvas the photo is placed on (lets gradients span the whole frame)
@@ -613,10 +618,10 @@ place_photo() {
 # Engraved on stone: a shadow copy nudged up-left and a highlight copy nudged down-right go first.
 text_layer() {  # dx dy (screen px, right/down) primary-fill secondary-fill
   local dx=$1 dy=$2
-  args+=( -gravity southwest -pointsize "$PT" -fill "$3" -annotate +$(( B + dx ))+$(( Y_TITLE - dy )) "$title"
-                             -pointsize "$PS" -fill "$4" -annotate +$(( B + dx ))+$(( Y_LOW - dy ))   "$sub"
-          -gravity southeast -pointsize "$PS" -fill "$3" -annotate +$(( B - dx ))+$(( Y_CAM - dy ))   "$camera"
-                             -pointsize "$PS" -fill "$4" -annotate +$(( B - dx ))+$(( Y_LOW - dy ))   "$info" )
+  args+=( -gravity southwest -pointsize "$PT" -fill "$3" -annotate +$(( B + dx ))+$(( Y_TITLE - dy )) "$(im_text "$title")"
+                             -pointsize "$PS" -fill "$4" -annotate +$(( B + dx ))+$(( Y_LOW - dy ))   "$(im_text "$sub")"
+          -gravity southeast -pointsize "$PS" -fill "$3" -annotate +$(( B - dx ))+$(( Y_CAM - dy ))   "$(im_text "$camera")"
+                             -pointsize "$PS" -fill "$4" -annotate +$(( B - dx ))+$(( Y_LOW - dy ))   "$(im_text "$info")" )
 }
 upper() { perl -CS -Mutf8 -pe '$_ = uc; s/Ƒ/ƒ/g' <<<"$1"; }   # (ƒ stays lowercase: DIN Condensed has no Ƒ)
 
@@ -649,13 +654,13 @@ add_label() {
   where="$place${place:+${year:+, }}$year"
   medium="Digital photograph${T_film:+, $brand $T_film}"
   p1=$(u 26); p2=$(u 20)
-  lines+=( \( -font "$SERIF Bold.ttf" -pointsize $p1 -fill "$FG" label:"$title" \) )
+  lines+=( \( -font "$SERIF Bold.ttf" -pointsize $p1 -fill "$FG" label:"$(im_text "$title")" \) )
   [[ -n "$where" ]] && lines+=( \( -size 1x$(( p2 / 3 )) xc:none +size \)
-                                \( -font "$SERIF Italic.ttf" -pointsize $p2 -fill "$FG" label:"$where" \) )
+                                \( -font "$SERIF Italic.ttf" -pointsize $p2 -fill "$FG" label:"$(im_text "$where")" \) )
   lines+=( \( -size 1x$(( p2 * 3 / 4 )) xc:none +size \)
-           \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$medium" \) )
-  [[ -n "$body$lens" ]] && lines+=( \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$body${body:+${lens:+ $SEP }}$lens" \) )
-  [[ -n "$info" ]] && lines+=( \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$info" \) )
+           \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$(im_text "$medium")" \) )
+  [[ -n "$body$lens" ]] && lines+=( \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$(im_text "$body${body:+${lens:+ $SEP }}$lens")" \) )
+  [[ -n "$info" ]] && lines+=( \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$(im_text "$info")" \) )
   magick -background none "${lines[@]}" -gravity west -append "$TMP/label.miff"
   lw=$(magick "$TMP/label.miff" -format %w info:)
   # A left-aligned block whose right edge lines up with the photo's right edge
@@ -666,7 +671,7 @@ add_label() {
 add_poster() {
   local y0=$(( TOPB + H )) i
   args+=( -fill "$FG" -font HelveticaNeue-Medium -pointsize $PPS -gravity northeast
-          -annotate +$B+$(( B / 2 - PPS / 2 )) "No. $T_frame"
+          -annotate +$B+$(( B / 2 - PPS / 2 )) "$(im_text "No. $T_frame")"
           -gravity northwest "$TMP/ptitle.miff" -geometry +$B+$(( y0 + PY_TITLE )) -composite
           -draw "rectangle $B,$(( y0 + PY_RULE )) $(( FW - B - 1 )),$(( y0 + PY_RULE + PRULE - 1 ))" )
   for i in 1 2 3; do
@@ -678,18 +683,18 @@ add_poster() {
 # soft shadow, like a classic travel postcard. The city, else the country, else no text. A long name
 # shrinks to fit the photo width.
 add_caption() {
-  local name pc k d top maxw w
+  local name lbl pc k d top maxw w
   name=${T_city:-$T_country}
   [[ -n "$name" ]] || return 0
-  name=$(upper "$name")
+  name=$(upper "$name"); lbl=$(im_text "$name")
   pc=$(u 170); maxw=$(( W * 88 / 100 ))
-  w=$(magick -font Futura-CondExtraBold -kerning $(( pc / 20 )) -pointsize $pc label:"$name" -format %w info:)
+  w=$(magick -font Futura-CondExtraBold -kerning $(( pc / 20 )) -pointsize $pc label:"$lbl" -format %w info:)
   if (( w > maxw )); then pc=$(( pc * maxw / w )); fi
   k=$(( pc / 20 )); d=$(( pc / 25 + 1 )); top=$(( TOPB + pc / 3 ))
   args+=( \( +size -background none -font Futura-CondExtraBold -kerning $k -pointsize $pc -fill "rgba(0,0,0,0.6)"
-             label:"$name" -bordercolor none -border $(( pc / 4 )) -blur 0x$(( pc / 9 )) \)
+             label:"$lbl" -bordercolor none -border $(( pc / 4 )) -blur 0x$(( pc / 9 )) \)
           -gravity north -geometry +$d+$(( top - pc / 4 + d )) -composite
-          \( +size -background none -font Futura-CondExtraBold -kerning $k -pointsize $pc -fill "#FFFDF6" label:"$name" \)
+          \( +size -background none -font Futura-CondExtraBold -kerning $k -pointsize $pc -fill "#FFFDF6" label:"$lbl" \)
           -gravity north -geometry +0+$top -composite )
 }
 
@@ -755,11 +760,11 @@ add_edge_print() {
   pe=$PS; tri=$(( pe * 60 / 100 ))                          # same size as the other text; triangle size
   y=$(( B * 85 / 100 )); base=$(( FH - y - pe * 50 / 100 ))  # y = centre of the row, from the top
   args+=( -fill "$AMBER" -stroke none -font "$FONT_COND" -pointsize $pe -gravity southwest
-          -annotate +$B+$(( base - pe * 18 / 100 )) "$film" )
+          -annotate +$B+$(( base - pe * 18 / 100 )) "$(im_text "$film")" )
   for t in "30:$n" "58:${n}A" "84:$(( n + 1 ))"; do
     x=$(( FW * ${t%%:*} / 100 ))
     args+=( -draw "polygon $x,$(( y - tri / 2 )) $(( x + tri )),$y $x,$(( y + tri / 2 ))"
-            -annotate +$(( x + tri * 16 / 10 ))+$(( base - pe * 18 / 100 )) "${t#*:}" )
+            -annotate +$(( x + tri * 16 / 10 ))+$(( base - pe * 18 / 100 )) "$(im_text "${t#*:}")" )
   done
 }
 
