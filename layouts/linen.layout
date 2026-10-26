@@ -1,0 +1,8 @@
+[layout]
+extends     = standard
+category    = Fabric
+description = Woven linen
+
+[frame]
+background = material(linen)
+texture    = none

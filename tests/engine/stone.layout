@@ -1,0 +1,33 @@
+# Test: terrazzo with engraving on stacked (not baseline) text and the logo, keep-clear areas, inset photo
+[layout]
+name = stone
+
+[frame]
+padding     = 4pmin 4pmin 12pmin
+background  = material(terrazzo)
+text-effect = engrave
+font        = 2pmin DIN Alternate
+
+[photo]
+effect = inset
+
+[bottom]
+columns = auto 1fr auto
+
+[text title]
+cell      = bottom 1
+font-size = 3pmin
+content   = {title|city|filename}
+
+[text date]
+cell    = bottom 1
+color   = auto-dim
+content = {date}
+
+[logo maker]
+cell   = bottom 3
+margin = 0 0 0.5pmin 0
+
+[text lens]
+cell    = bottom 3
+content = {lens}

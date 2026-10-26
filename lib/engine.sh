@@ -377,8 +377,9 @@ ly_rule_setup() {  # item
 # =====================================================================================================
 # Background canvas and ink (FG, FG2, DARK, LUM) from [frame] background / texture
 ly_background() {
-  local v a=() ang=135 lum
+  local v a=() ang=135 lum="" n
   lv frame background; v=${REPLY:-white}
+  BG_KIND=canvas; BG_NAME=""
   case "$v" in
     auto) canvas=( "xc:$(auto_colour)" ) ;;
     gradient\(*\))
@@ -388,7 +389,20 @@ ly_background() {
       [[ -n "${a[2]:-}" ]] && ang=${a[2]}
       canvas=( -define gradient:angle=$ang "gradient:${a[0]}-${a[1]}" ) ;;
     \$*) lerr frame background "$v isn't set here" ;;
-    material\(*|frost*|film|dominant) lerr frame background "background $v is not available yet" ;;
+    material\(*\))
+      n=${v#material(}; n=$(ly_trim "${n%)}")
+      # Light or dark stone (decides the ink without rendering it twice: terrazzo's chips are random)
+      case "$n" in
+        marble|marble-beige|terrazzo|linen) lum=0.9 ;;
+        marble-dark|marble-green)           lum=0.1 ;;
+        *) lerr frame background "unknown material '$n' (marble, marble-dark, marble-green, marble-beige, terrazzo, linen)" ;;
+      esac
+      BG_KIND=material; BG_NAME=$n ;;
+    frost\(*\))
+      n=${v#frost(}; n=$(ly_trim "${n%)}")
+      case "$n" in light) lum=0.9 ;; dark) lum=0.1 ;; *) lerr frame background "frost(light) or frost(dark)" ;; esac
+      BG_KIND=frost; BG_NAME=$n ;;
+    film|dominant) lerr frame background "background $v is not available yet" ;;
     *)
       if [[ "$v" =~ ^([^-]+)-([^-]+)$ ]]; then   # "#A-#B" (a gradient from -b)
         colour "${BASH_REMATCH[1]}" frame background; colour "${BASH_REMATCH[2]}" frame background
@@ -397,8 +411,17 @@ ly_background() {
         colour "$v" frame background; canvas=( "xc:$v" )
       fi ;;
   esac
-  lum=$(magick -size 64x64 "${canvas[@]}" -resize 1x1\! -format "%[fx:luminance]" info:)
+  [[ -n "$lum" ]] || lum=$(magick -size 64x64 "${canvas[@]}" -resize 1x1\! -format "%[fx:luminance]" info:)
   canvas_ink "$lum"
+  # Photo effect and text effect
+  lv photo effect; PHOTO_FX=${REPLY:-none}
+  case "$PHOTO_FX" in
+    none|inset|drop-shadow) ;;
+    bevel*) lerr photo effect "effect $PHOTO_FX is not available yet" ;;
+    *) lerr photo effect "effect is none, inset or drop-shadow" ;;
+  esac
+  lv frame text-effect; TEXT_FX=${REPLY:-none}
+  case "$TEXT_FX" in none|engrave) ;; *) lerr frame text-effect "text-effect is none or engrave" ;; esac
   lv frame texture
   PAPER_ON=0; PAPER_K=0
   case "$REPLY" in
@@ -486,6 +509,38 @@ ly_resolve() {
   FH=$(( PAD_T + H + PAD_B ))
   for band in top bottom left right; do ly_band_place "$band"; done
   ly_photo_place
+  # Engraving offset and terrazzo's keep-clear areas, from the frame's font size
+  font_prop "" size; PX_REF="" px "$REPLY" "$TP_SEC" "$TP_KEY"; FRAME_PS=$REPLY
+  ENG_O=$(( FRAME_PS / 22 + 1 ))
+  CLEAR=""; [[ "$BG_KIND" == material && "$BG_NAME" == terrazzo ]] && ly_keep_clear
+  return 0
+}
+
+# Keep-clear areas: one per band column, around that column's items (from the top of the letters to
+# the baseline for text on a baseline), all as tall as the band's items together, padded by half the
+# frame's font size. -> CLEAR "x0,y0,x1,y1 …"
+ly_keep_clear() {
+  local band v ids id cs x y w h b top bot pad=$(( FRAME_PS / 2 )) cols c
+  for band in top bottom left right; do
+    v="BAND_${band}_ids"; ids=${!v-}; [[ -n "$ids" ]] || continue
+    top=""; bot=""; cols=""
+    for id in $ids; do
+      lv "i_$id" type; [[ "$REPLY" == rect ]] && continue
+      igt "$id" cs; cs=$REPLY
+      igt "$id" x; x=$REPLY; igt "$id" y; y=$REPLY; igt "$id" w; w=$REPLY; igt "$id" h; h=$REPLY
+      igt "$id" base; b=${REPLY:-$(( y + h ))}
+      [[ -z "$top" ]] || (( y < top )) && top=$y
+      [[ -z "$bot" ]] || (( b > bot )) && bot=$b
+      v="KC_x0_$cs"; [[ -z "${!v-}" ]] || (( x < ${!v} )) && printf -v "$v" %s "$x"
+      v="KC_x1_$cs"; [[ -z "${!v-}" ]] || (( x + w > ${!v} )) && printf -v "$v" %s $(( x + w ))
+      [[ " $cols " == *" $cs "* ]] || cols="$cols $cs"
+    done
+    for c in $cols; do
+      v="KC_x0_$c"; local x0=${!v}; v="KC_x1_$c"; local x1=${!v}
+      CLEAR="${CLEAR:+$CLEAR }$(( x0 - pad )),$(( top - pad )),$(( x1 + pad )),$(( bot + pad ))"
+      unset "KC_x0_$c" "KC_x1_$c"
+    done
+  done
   return 0
 }
 
@@ -644,11 +699,24 @@ ly_absolute() {  # item rx ry rw rh
   if [[ "$REPLY" == baseline ]]; then
     lv "i_$id" type; [[ "$REPLY" == text ]] || lerr "i_$id" vertical-align "vertical-align = baseline is for text"
     [[ -n "$Bt" ]] || lerr "i_$id" vertical-align "vertical-align = baseline needs bottom"
+    # The box from the font's ascent to its descent around the baseline; keep-clear areas stop at the baseline
+    local base=$(( ry + rh - Bt )) asc desc
+    igt "$id" font; local f=$REPLY; igt "$id" psize; local ps=$REPLY; igt "$id" text
+    read -r asc desc < <(text_metrics "$f" "$ps" "$REPLY")
+    ist "$id" y $(( base - asc )); ist "$id" h $(( asc - desc )); ist "$id" base "$base"
     # -annotate offsets: from the image's left or right edge, and from its bottom edge to the baseline
     if [[ -n "$R" ]]; then ist "$id" annot "southeast +$(( FW - rx - rw + R ))+$(( FH - ry - rh + Bt ))"
     else ist "$id" annot "southwest +$(( rx + ${L:-0} ))+$(( FH - ry - rh + Bt ))"; fi
   fi
   return 0
+}
+
+# Ascent and descent (negative) of a text in a font, from ImageMagick's own metrics
+text_metrics() {  # font size text
+  local t; t=$(im_text "$3")
+  magick -debug annotate xc: -font "$1" -pointsize "$2" -annotate 0 "$t" null: 2>&1 |
+    sed -n 's/.*ascent: \([-0-9.]*\); descent: \([-0-9.]*\).*/\1 \2/p' | head -1 |
+    awk '{ printf "%d %d\n", $1, $2 }'
 }
 
 # A rectangle: inset from its region's edges (negative = outside)
@@ -721,18 +789,42 @@ ly_plan() {
     igt "$id" x; local x=$REPLY; igt "$id" y; local y=$REPLY; igt "$id" w; local w=$REPLY; igt "$id" h
     echo "$v $id $x $y $w $REPLY"
   done
+  local c
+  for c in $CLEAR; do
+    IFS=, read -r x0 y0 x1 y1 <<<"$c"; echo "clear - $x0 $y0 $(( x1 - x0 )) $(( y1 - y0 ))"
+  done
+  return 0
+}
+
+# The canvas for backgrounds that depend on the frame's size
+ly_canvas() {
+  local sw sh tint
+  case "$BG_KIND" in
+    material) material "$BG_NAME" $FW $FH "$TMP/material.miff"; canvas=( "$TMP/material.miff" ) ;;
+    frost)
+      # Frosted glass: the photo stretched to fill the frame, blurred (cheaply, at 1/16 size), washed with a
+      # tint so text stays readable, plus fine grain
+      if [[ "$BG_NAME" == light ]]; then tint=( -fill white -colorize 55% ); else tint=( -fill black -colorize 50% ); fi
+      sw=$(( FW / 16 )); sh=$(( FH / 16 ))
+      canvas=( \( "$in" -auto-orient -resize ${sw}x${sh}^ -gravity center -extent ${sw}x${sh} -blur 0x4
+                   -resize ${FW}x${FH}\! "${tint[@]}" -attenuate 0.2 +noise Gaussian \) ) ;;
+  esac
   return 0
 }
 
 ly_draw() {
   local id t x y w h f s a sx sy p sf
+  ly_canvas
   paper   # (adds the texture to the canvas)
-  args=( -size ${FW}x${FH} "${canvas[@]}" -gravity northwest )
+  args=( -size ${FW}x${FH} "${canvas[@]}" )
+  if [[ "$PHOTO_FX" == drop-shadow ]]; then photo_shadow_args $PAD_L $PAD_T $PAD_L; args+=( "${SHADOW_ARGS[@]}" ); fi
+  args+=( -gravity northwest )
   for id in $PLAN_ITEMS; do   # rectangles under the photo
     lv "i_$id" type; [[ "$REPLY" == rect ]] || continue
     lv "i_$id" under-photo; [[ "$REPLY" == yes ]] && ly_draw_rect "$id"
   done
   args+=( \( "$in" -auto-orient \) -gravity northwest -geometry +$PAD_L+$PAD_T -composite )
+  if [[ "$PHOTO_FX" == inset ]]; then photo_inset_args $PAD_L $PAD_T $PAD_L; args+=( "${INSET_ARGS[@]}" ); fi
   for id in $PLAN_ITEMS; do
     lv "i_$id" type; t=$REPLY
     igt "$id" x; x=$REPLY; igt "$id" y; y=$REPLY; igt "$id" w; w=$REPLY; igt "$id" h; h=$REPLY
@@ -743,22 +835,47 @@ ly_draw() {
           igt "$id" font; f=$REPLY; igt "$id" text; s=$(im_text "$REPLY")
           local k; igt "$id" kern; k=$REPLY
           igt "$id" psize; local ps=$REPLY; igt "$id" fill
-          args+=( -font "$f" -pointsize "$ps" -fill "$REPLY" )
+          local fill=$REPLY
+          args+=( -font "$f" -pointsize "$ps" )
           (( k )) && args+=( -kerning "$k" )
-          args+=( -gravity "${a%% *}" -annotate "${a#* }" "$s" )
+          if [[ "$TEXT_FX" == engrave ]]; then
+            # Cut into the stone: a shadow copy up-left and a highlight copy down-right (fainter for dim text)
+            local g=${a%% *} off=${a#* } ox oy dark=0.45 light=0.55
+            tprop "$id" color; [[ "$REPLY" == auto-dim ]] && { dark=0.3; light=0.35; }
+            off=${off#+}; ox=${off%%+*}; oy=${off#*+}
+            if [[ "$g" == southwest ]]; then
+              args+=( -fill "rgba(0,0,0,$dark)" -gravity $g -annotate +$(( ox - ENG_O ))+$(( oy + ENG_O )) "$s"
+                      -fill "rgba(255,255,255,$light)" -gravity $g -annotate +$(( ox + ENG_O ))+$(( oy - ENG_O )) "$s" )
+            else
+              args+=( -fill "rgba(0,0,0,$dark)" -gravity $g -annotate +$(( ox + ENG_O ))+$(( oy + ENG_O )) "$s"
+                      -fill "rgba(255,255,255,$light)" -gravity $g -annotate +$(( ox - ENG_O ))+$(( oy - ENG_O )) "$s" )
+            fi
+          fi
+          args+=( -fill "$fill" -gravity "${a%% *}" -annotate "${a#* }" "$s" )
           (( k )) && args+=( -kerning 0 )
         else
           ly_text_shadows "$id"; igt "$id" shadows
           while read -r sf sx sy p; do
             [[ -n "$sf" ]] && args+=( "$sf" -gravity northwest -geometry +$(( x + sx - p ))+$(( y + sy - p )) -composite )
           done <<<"$REPLY"
-          igt "$id" img; args+=( "$REPLY" -gravity northwest -geometry +$x+$y -composite )
+          igt "$id" img; ly_engraved "$REPLY" $x $y
+          args+=( "$REPLY" -gravity northwest -geometry +$x+$y -composite )
         fi ;;
-      logo) igt "$id" img; args+=( "$REPLY" -gravity northwest -geometry +$x+$y -composite ) ;;
+      logo) igt "$id" img; ly_engraved "$REPLY" $x $y; args+=( "$REPLY" -gravity northwest -geometry +$x+$y -composite ) ;;
       rule) igt "$id" fill; args+=( -fill "$REPLY" -draw "rectangle $x,$y $(( x + w - 1 )),$(( y + h - 1 ))" ) ;;
       rect) lv "i_$id" under-photo; [[ "$REPLY" == yes ]] || ly_draw_rect "$id" ;;
     esac
   done
+  return 0
+}
+
+# Engraved copies of an image (text or logo) under it: tinted silhouettes up-left and down-right
+ly_engraved() {  # image x y
+  [[ "$TEXT_FX" == engrave ]] || return 0
+  args+=( \( "$1" -fill black -colorize 100 -channel A -evaluate multiply 0.45 +channel \)
+          -gravity northwest -geometry +$(( $2 - ENG_O ))+$(( $3 - ENG_O )) -composite
+          \( "$1" -fill white -colorize 100 -channel A -evaluate multiply 0.55 +channel \)
+          -gravity northwest -geometry +$(( $2 + ENG_O ))+$(( $3 + ENG_O )) -composite )
   return 0
 }
 

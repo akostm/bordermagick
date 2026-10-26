@@ -1,0 +1,13 @@
+# Stone: the photo set into the slab and the lettering engraved
+[layout]
+extends     = standard
+category    = Stone
+description = White Carrara marble
+
+[frame]
+background  = material(marble)
+texture     = none
+text-effect = engrave
+
+[photo]
+effect = inset

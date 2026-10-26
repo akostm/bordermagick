@@ -1,0 +1,12 @@
+# Frosted glass: the photo itself, blurred and washed light, with the photo floating above it
+[layout]
+extends     = standard
+category    = Glass
+description = Frosted glass made from the photo, light
+
+[frame]
+background = frost(light)
+texture    = none
+
+[photo]
+effect = drop-shadow

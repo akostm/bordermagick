@@ -34,6 +34,7 @@ CASES=(
   # Layout-engine test layouts (tests/engine/), framed through BORDERMAGICK_LAYOUTS
   "engine-standard|-b standard" "engine-label|-b label" "engine-caption|-b caption"
   "engine-grid|-b grid"         "engine-rects|-b rects" "engine-empty|-b empty"
+  "engine-stone|-b stone"
 )
 
 render() {  # dir photo…

@@ -74,8 +74,15 @@ material() {
         \( "$TMP/turb.png" +level 88%,100% \) -compose multiply -composite \
         -resize ${w}x${h}\! +level-colors "$vein,$stone" "$out" ;;
     terrazzo)
-      # Angular stone chips as random irregular polygons on a cream base (crisp at any resolution)
-      awk -v w=$w -v h=$h -v s=$s -v seed=$RANDOM -v clear="${CLEAR:-}" 'BEGIN {
+      # Angular stone chips as random irregular polygons on a cream base (crisp at any resolution).
+      # With BORDERMAGICK_SEED the n-th terrazzo of a run takes the n-th number after seeding, whatever else
+      # used $RANDOM in between (bash 3.2 here-strings do, for their temporary file names).
+      local seed i
+      if [[ -n "${BORDERMAGICK_SEED:-}" ]]; then
+        RANDOM=$BORDERMAGICK_SEED; for (( i = 0; i < ${CHIPS_DRAWN:-0}; i++ )); do : $RANDOM; done
+      fi
+      seed=$RANDOM; CHIPS_DRAWN=$(( ${CHIPS_DRAWN:-0} + 1 ))
+      awk -v w=$w -v h=$h -v s=$s -v seed=$seed -v clear="${CLEAR:-}" 'BEGIN {
         srand(seed); pi = 3.14159265
         n = split("#C9826B #C9826B #7E8C7A #7E8C7A #3F3F44 #D9B26F #B9B2A6 #B9B2A6 #E3D5C3", col, " ")
         nz = split(clear, z, " ")                         # keep-clear boxes "x0,y0,x1,y1"
@@ -546,16 +553,12 @@ background() {
     frost)
       # Frosted glass: the photo stretched to fill the frame, blurred (cheaply, at 1/16 size), washed with a
       # tint so text stays readable, plus fine grain for the frosted texture
-      local tint sw sh sp
+      local tint sw sh
       if [[ "$BG" == frost ]]; then tint=( -fill white -colorize 55% ); else tint=( -fill black -colorize 50% ); fi
       sw=$(( FW / 16 )); sh=$(( FH / 16 ))
       canvas=( \( "$in" -auto-orient -resize ${sw}x${sh}^ -gravity center -extent ${sw}x${sh} -blur 0x4
                    -resize ${FW}x${FH}\! "${tint[@]}" -attenuate 0.2 +noise Gaussian \) )
-      # Soft drop shadow under the photo so it floats above the glass (also built small and scaled up)
-      sp=$(( B / 32 + 1 ))
-      shadow=( \( -size $(( W / 16 ))x$(( H / 16 )) "xc:rgba(0,0,0,0.35)" -bordercolor none -border $(( 2*sp ))
-                   -blur 0x$sp -resize $(( W + 64*sp ))x$(( H + 64*sp ))\! \)
-               -gravity northwest -geometry $(printf "%+d%+d" $(( B - 32*sp )) $(( B - 32*sp + B/6 ))) -composite ) ;;
+      photo_shadow_args $B $B $B; shadow=( "${SHADOW_ARGS[@]}" ) ;;
     material)
       if [[ "$BG" == terrazzo ]]; then
         # Keep chips off the text: measure both text blocks (plus the logo) and pass them as keep-clear boxes
@@ -636,22 +639,35 @@ place_photo() {
                -blur 0x1 \) -gravity northwest -geometry +$(( B - bev ))+$(( TOPB - bev )) -composite )
   fi
   args+=( \( "$in" -auto-orient \) -gravity northwest -geometry +$B+$TOPB -composite )
-  if (( INSET )); then
-    local sc=8 sw sh d sg lw
-    sw=$(( W / sc )); sh=$(( H / sc )); d=$(( B / 6 / sc + 1 )); sg=$(( B / 5 / sc + 1 )); lw=$(( B / 40 + 1 ))
-    args+=( \( -size ${W}x${H} xc:black
-               \( -size ${sw}x${sh} xc:white -fill black -draw "rectangle $d,$d $(( sw + 3*sg )),$(( sh + 3*sg ))"
-                  -blur 0x$sg -resize ${W}x${H}\! -evaluate multiply 0.6 \)
-               -alpha off -compose CopyOpacity -composite \)
-            -compose over -gravity northwest -geometry +$B+$B -composite
-            -fill "rgba(0,0,0,0.35)"
-            -draw "rectangle $(( B - lw )),$(( B - lw )) $(( B + W - 1 )),$(( B - 1 ))"
-            -draw "rectangle $(( B - lw )),$(( B - lw )) $(( B - 1 )),$(( B + H - 1 ))"
-            -fill "rgba(255,255,255,0.5)"
-            -draw "rectangle $B,$(( B + H )) $(( B + W + lw - 1 )),$(( B + H + lw - 1 ))"
-            -draw "rectangle $(( B + W )),$B $(( B + W + lw - 1 )),$(( B + H + lw - 1 ))" )
-  fi
+  if (( INSET )); then photo_inset_args $B $B $B; args+=( "${INSET_ARGS[@]}" ); fi
   return 0
+}
+
+# Soft drop shadow under a photo at x,y so it floats above the glass (built small and scaled up); the
+# border width sets its spread. -> SHADOW_ARGS
+photo_shadow_args() {  # x y border
+  local sp=$(( $3 / 32 + 1 ))
+  SHADOW_ARGS=( \( -size $(( W / 16 ))x$(( H / 16 )) "xc:rgba(0,0,0,0.35)" -bordercolor none -border $(( 2*sp ))
+                  -blur 0x$sp -resize $(( W + 64*sp ))x$(( H + 64*sp ))\! \)
+                -gravity northwest -geometry $(printf "%+d%+d" $(( $1 - 32*sp )) $(( $2 - 32*sp + $3/6 ))) -composite )
+}
+
+# A photo at x,y recessed into stone: an inner shadow over its top and left edges (built at 1/8 size and
+# scaled up), a shadow line on the cut edge above/left, a highlight below/right. -> INSET_ARGS
+photo_inset_args() {  # x y border
+  local x=$1 y=$2 sc=8 sw sh d sg lw
+  sw=$(( W / sc )); sh=$(( H / sc )); d=$(( $3 / 6 / sc + 1 )); sg=$(( $3 / 5 / sc + 1 )); lw=$(( $3 / 40 + 1 ))
+  INSET_ARGS=( \( -size ${W}x${H} xc:black
+                 \( -size ${sw}x${sh} xc:white -fill black -draw "rectangle $d,$d $(( sw + 3*sg )),$(( sh + 3*sg ))"
+                    -blur 0x$sg -resize ${W}x${H}\! -evaluate multiply 0.6 \)
+                 -alpha off -compose CopyOpacity -composite \)
+               -compose over -gravity northwest -geometry +$x+$y -composite
+               -fill "rgba(0,0,0,0.35)"
+               -draw "rectangle $(( x - lw )),$(( y - lw )) $(( x + W - 1 )),$(( y - 1 ))"
+               -draw "rectangle $(( x - lw )),$(( y - lw )) $(( x - 1 )),$(( y + H - 1 ))"
+               -fill "rgba(255,255,255,0.5)"
+               -draw "rectangle $x,$(( y + H )) $(( x + W + lw - 1 )),$(( y + H + lw - 1 ))"
+               -draw "rectangle $(( x + W )),$y $(( x + W + lw - 1 )),$(( y + H + lw - 1 ))" )
 }
 
 # --- 7. Text: title and place/date on the left, camera and settings on the right.

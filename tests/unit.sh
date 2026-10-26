@@ -137,7 +137,11 @@ B="$HERE/engine/bad"
 bad() { ( cd "$OUT/photos" && BORDERMAGICK_LAYOUTS="$B" "$ROOT/bordermagick" --plan -b "$1" fuji_33.jpg ); }
 fails_with "engine bad unit"    "$B/bad-unit.layout:2: '3pt': unknown unit 'pt'"       bad bad-unit
 fails_with "engine bad font"    "$B/bad-font.layout:3: no font 'No Such Font'"         bad bad-font
-fails_with "engine background"  "background material(marble) is not available yet"    bad bad-bg
+fails_with "engine background"  "background film is not available yet"                bad bad-bg
+fails_with "engine material"    "unknown material 'granite'"                          bad bad-material
+fails_with "engine frost"       "frost(light) or frost(dark)"                         bad bad-frost
+fails_with "engine effect"      "effect is none, inset or drop-shadow"                bad bad-effect
+fails_with "engine text effect" "text-effect is none or engrave"                      bad bad-text-effect
 fails_with "engine later item"  "[edge-print] items are not available yet"             bad later-item
 fails_with "engine anchor"      "'middle' is not a photo anchor"                      bad bad-anchor
 fails_with "engine fw side"     "fw can't be used here"                               bad fw-side
