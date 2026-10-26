@@ -1,0 +1,33 @@
+[layout]
+name = grand
+category = Test
+description = Child of base
+extends = child
+
+[frame]
+padding = 3pmin 3pmin 13pmin
+background = #F3F0E8
+texture = paper 6
+color = auto
+font = 2pmin Georgia
+
+[photo]
+effect = bevel 0.4pmin #FBFAF6
+
+[bottom]
+columns = 1fr auto
+
+[text title]
+cell = bottom 1
+content = {title|city|filename}
+font-size = 4pmin
+
+[text exposure]
+cell = bottom 2
+content = {exposure}
+color = #222222
+
+[text where]
+cell = bottom 2
+content = {place} ∙ {date}
+

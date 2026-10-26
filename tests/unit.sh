@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Unit checks for lib/: the template engine and the tags read from the generated test photos.
-# Quick; no renders.
+# Unit checks for lib/: the template engine, layout files (parsing, extends, errors) and the tags read
+# from the generated test photos. Quick; no renders.
 #
 #   tests/unit.sh
 set -uo pipefail
@@ -8,10 +8,12 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/.."
 OUT="${RENDER_OUT:-$HERE/out}"
+FIX="$HERE/layouts"
 
 SEP="∙"
 die() { echo "$1" >&2; exit 1; }   # lib errors end the subshell a check runs in
 . "$ROOT/lib/tags.sh"
+. "$ROOT/lib/layout.sh"
 . "$HERE/photos.sh"
 
 pass=0; fail=0
@@ -58,6 +60,40 @@ fails_with "template open ["       "'[' without ']'"             expand '[{city}
 fails_with "template stray ]"      "']' without '['"             expand '{city}]'
 fails_with "template stray }"      "'}' without '{'"             expand 'city}'
 fails_with "template format"       ":format only works on {date}" expand '{city:%Y}'
+
+# --- Layout files
+LY_VAR_border="#FFFFFF"; LY_VAR_paper=6
+LAYOUT_PATH="$FIX/builtin"
+layout_load grand
+check "dump grand (extends child, base)" "$(cat "$FIX/grand.expected")" "$(layout_dump)"
+check "items after remove" "title exposure where" "$LY_ITEMS"
+check "layout_get" "{place} ∙ {date}" "$(layout_get i_where content)"
+check "source of a value" "$FIX/builtin/child.layout:6" "$LYS_frame__background"
+check "quoted value keeps spaces" "  kept with its spaces  " "$(LAYOUT_PATH="$FIX/builtin"; layout_load base; layout_get layout description)"
+check "variables" "#FFFFFF|paper 6" "$(layout_load base; echo "$(layout_get frame background)|$(layout_get frame texture)")"
+check "unset variable kept" '$border' "$(LY_VAR_border=""; layout_load base; layout_get frame background)"
+
+LAYOUT_PATH="$FIX/user:$FIX/builtin"
+check "user layout wins" "$FIX/user/base.layout" "$(layout_find base)"
+check "list" "base mine child grand" "$(layout_list)"
+check "user layout extends built-in" "title exposure where line|Mine" "$(layout_load mine; echo "$LY_ITEMS|$(layout_get layout category)")"
+
+LAYOUT_PATH="$FIX/errors:$FIX/builtin"
+E="$FIX/errors"
+fails_with "loop"           "loop: loop-a → loop-b → loop-a"                    layout_load loop-a
+fails_with "unknown key"    "$E/bad-key.layout:5: unknown key 'colour' in [text title]" layout_load bad-key
+fails_with "bad line"       "$E/bad-line.layout:3: expected [section] or key = value" layout_load bad-line
+fails_with "name mismatch"  "name = other, but the file is name-mismatch.layout" layout_load name-mismatch
+fails_with "type clash"     "$E/type-clash.layout:4: [rule title] is a text item" layout_load type-clash
+fails_with "unknown var"    "$E/unknown-var.layout:2: unknown variable \$colour" layout_load unknown-var
+fails_with "planned type"   "[swatches] items are planned"                      layout_load planned
+fails_with "unnamed item"   "$E/unnamed.layout:3: [text] needs a name"           layout_load unnamed
+fails_with "no section"     "$E/no-section.layout:2: 'padding' comes before any [section]" layout_load no-section
+fails_with "missing parent" "no layout 'nothing-here'"                         layout_load no-parent
+fails_with "open quote"     "$E/open-quote.layout:2: missing closing \""        layout_load open-quote
+fails_with "bad type"       "$E/bad-type.layout:1: unknown item type 'texts'"   layout_load bad-type
+fails_with "no such layout" "no layout 'nope'"                                 layout_load nope
+fails_with "self extend"    "extends self-loop, but there is no other self-loop.layout" layout_load self-loop
 
 # --- Tags of the generated test photos, through the script
 make_photos "$OUT/photos"

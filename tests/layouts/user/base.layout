@@ -1,0 +1,4 @@
+# Same name as a built-in layout: replaces it, and here also extends it
+[layout]
+extends  = base
+category = Mine

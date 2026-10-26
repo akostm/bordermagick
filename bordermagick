@@ -14,16 +14,17 @@ AMBER="#F2B134"                                                        # contact
 SERIF="/System/Library/Fonts/Supplemental/Georgia"                     # museum label: + .ttf / Bold / Italic
 SEP="∙"
 
-# The script's own folder (through symlinks, e.g. a link in /usr/local/bin), for lib/
+# The script's own folder (through symlinks, e.g. a link in /usr/local/bin), for lib/ and layouts/
 src=$0
 while [[ -L "$src" ]]; do
   dir=$(cd -P "$(dirname "$src")" && pwd); src=$(readlink "$src"); [[ "$src" == /* ]] || src="$dir/$src"
 done
 BM_DIR=$(cd -P "$(dirname "$src")" && pwd)
-for lib in tags; do
+for lib in tags layout; do
   [[ -f "$BM_DIR/lib/$lib.sh" ]] || { echo "bordermagick: $BM_DIR/lib/$lib.sh is missing (keep lib/ next to the script)" >&2; exit 2; }
   . "$BM_DIR/lib/$lib.sh"
 done
+LAYOUT_PATH="$BM_HOME/layouts:$BM_DIR/layouts"   # your own layouts first, then the built-in ones
 
 TMP=$(mktemp -d)
 trap 'rm -f "$TMP"/*; rmdir "$TMP"' EXIT
@@ -268,7 +269,7 @@ die() {  # message [hint]
 
 [[ "${1:-}" == --help ]] && { help; exit 0; }
 [[ "${1:-}" == --version ]] && { echo "$ME $VERSION"; exit 0; }
-# The tags a photo has (the values bordermagick reads from it)
+# For writing layouts: the tags a photo has, and a layout as bordermagick reads it (with what it extends)
 if [[ "${1:-}" == --tags ]]; then
   shift; (( $# )) || die "--tags needs a photo"
   idx=0
@@ -278,6 +279,11 @@ if [[ "${1:-}" == --tags ]]; then
     (( $# > 1 )) && echo "== $in"
     read_tags "$in" "$idx"; print_tags
   done
+  exit 0
+fi
+if [[ "${1:-}" == --dump-layout ]]; then
+  [[ -n "${2:-}" ]] || die "--dump-layout needs a layout name" "$(ly_available)"
+  layout_load "$2"; layout_dump
   exit 0
 fi
 DOWNLOAD_ALL=0

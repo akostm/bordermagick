@@ -1,0 +1,26 @@
+# Test layout: the parent of child and grand
+[layout]
+name        = base
+category    = Test
+description = "  kept with its spaces  "
+
+[frame]
+padding    = 3pmin 3pmin 13pmin
+background = $border   # from -b
+texture    = paper $paper
+color      = auto
+
+[bottom]
+columns = 1fr auto
+
+[text title]
+cell    = bottom 1
+content = {title|city|filename}
+
+[logo maker]
+cell = bottom 2
+
+[text exposure]
+cell    = bottom 2
+content = {exposure}
+color   = #6E6A64

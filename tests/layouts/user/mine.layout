@@ -1,0 +1,7 @@
+[layout]
+extends = child
+
+[rect line]
+cell  = photo center
+inset = -1pmin
+fill  = white

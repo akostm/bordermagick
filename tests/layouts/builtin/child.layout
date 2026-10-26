@@ -1,0 +1,17 @@
+[layout]
+extends     = base
+description = Child of base
+
+[frame]
+background = #F3F0E8
+font       = 2pmin Georgia
+
+[text title]
+font-size = 4pmin
+
+[logo maker]
+remove = yes
+
+[text where]
+cell    = bottom 2
+content = {place} ∙ {date}

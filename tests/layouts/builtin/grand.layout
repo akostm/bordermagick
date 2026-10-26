@@ -1,0 +1,9 @@
+[layout]
+name    = grand
+extends = child
+
+[photo]
+effect = bevel 0.4pmin #FBFAF6
+
+[text exposure]
+color = #222222
