@@ -1,0 +1,5 @@
+[frame]
+padding = 3pmin
+
+[edge-print e]
+cell = top 1

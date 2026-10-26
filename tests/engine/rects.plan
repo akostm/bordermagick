@@ -1,0 +1,15 @@
+== fuji_33.jpg
+frame - 0 0 978 678
+photo - 39 39 900 600
+rect line 33 33 912 612
+rect box 66 66 846 546
+== no_exif.jpg
+frame - 0 0 904 904
+photo - 52 52 800 800
+rect line 44 44 816 816
+rect box 88 88 728 728
+== sony_portrait.jpg
+frame - 0 0 678 978
+photo - 39 39 600 900
+rect line 33 33 612 912
+rect box 66 66 546 846

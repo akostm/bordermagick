@@ -1,0 +1,26 @@
+# Test: items that vanish without metadata; the band keeps its size
+[layout]
+name = empty
+
+[frame]
+padding    = 3pmin 3pmin 10pmin
+background = #222222
+
+[bottom]
+columns = auto 1fr auto
+
+[text title]
+cell    = bottom 1
+content = {title}
+
+[text film]
+cell    = bottom 2
+justify = center
+content = [Film: {film}]
+
+[logo maker]
+cell = bottom 3
+
+[text lens]
+cell    = bottom 3
+content = {lens}

@@ -31,21 +31,26 @@ CASES=(
   "poster|-b poster"  "poster-colour|-b poster-colour" "postcard|-b postcard"
   "cover-yellow|-b cover-yellow" "cover-red|-b cover-red"
   "fit|-s fit"        "fhd|-s fhd -b marble" "px500|-s 500 -b contact" "strip|-m strip -b sunset"
+  # Layout-engine test layouts (tests/engine/), framed through BORDERMAGICK_LAYOUTS
+  "engine-standard|-b standard" "engine-label|-b label" "engine-caption|-b caption"
+  "engine-grid|-b grid"         "engine-rects|-b rects" "engine-empty|-b empty"
 )
 
 render() {  # dir photo…
   local dir=$1; shift
   mkdir -p "$dir"; rm -f "$dir"/*.png
   local work="$OUT/work"; rm -rf "$work"; mkdir -p "$work"
-  local p c name opts base f
+  local p c name opts base f layouts
   for p in "$@"; do
     base=$(basename "${p%.*}")
     cp "$p" "$work/$base.jpg"
     for c in "${CASES[@]}"; do
       name=${c%%|*}; opts=${c#*|}
       rm -f "$work/${base}"_*_*.jpg
+      layouts=""; [[ "$name" == engine-* ]] && layouts="$HERE/engine"
       # shellcheck disable=SC2086
-      "$BM" $opts "$work/$base.jpg" >/dev/null 2>"$work/err.txt" || { echo "FAILED: $base $name"; cat "$work/err.txt"; continue; }
+      BORDERMAGICK_LAYOUTS=$layouts "$BM" $opts "$work/$base.jpg" >/dev/null 2>"$work/err.txt" ||
+        { echo "FAILED: $base $name"; cat "$work/err.txt"; continue; }
       f=$(ls "$work/${base}"_*_*.jpg)
       # Pixels plus the metadata the frame carries, so both are compared
       magick "$f" "$dir/${base}__${name}.png"

@@ -14,6 +14,7 @@ SEP="∙"
 die() { echo "$1" >&2; exit 1; }   # lib errors end the subshell a check runs in
 . "$ROOT/lib/tags.sh"
 . "$ROOT/lib/layout.sh"
+. "$ROOT/lib/engine.sh"
 . "$HERE/photos.sh"
 
 pass=0; fail=0
@@ -94,6 +95,63 @@ fails_with "open quote"     "$E/open-quote.layout:2: missing closing \""        
 fails_with "bad type"       "$E/bad-type.layout:1: unknown item type 'texts'"   layout_load bad-type
 fails_with "no such layout" "no layout 'nope'"                                 layout_load nope
 fails_with "self extend"    "extends self-loop, but there is no other self-loop.layout" layout_load self-loop
+
+# --- Engine: units, shorthand, fonts, tracks
+S=1000; W=1500; H=1000; FW=1600; PX_EM=40; PX_REF=""; BM_HOME="$HERE/out/nohome"
+u() { echo $(( S * $1 / 1000 )); }
+pxv() { PX_REF=${2:-} px "$1"; echo "$REPLY"; }
+check "px pmin = u()"     "$(u 26)"  "$(pxv 2.6pmin)"
+check "px rounding"       "$(( 1234 * 17 / 1000 ))" "$(S=1234 pxv 1.7pmin)"
+check "px pw, ph, fw"     "150 50 16" "$(pxv 10pw) $(pxv 5ph) $(pxv 1fw)"
+check "px em, px, 0"      "20 7 0"   "$(pxv 0.5em) $(pxv 7px) $(pxv 0)"
+check "px %"              "250"      "$(pxv 25% 1000)"
+check "px negative"       "-10"      "$(pxv -1pmin)"
+fails_with "px no unit"   "needs a unit"         px 3
+fails_with "px bad unit"  "unknown unit 'pt'"    px 3pt
+fails_with "px % here"    "% can't be used here" px 5%
+fails_with "px fw unknown" "fw can't be used"    eval 'FW=0 px 1fw'
+check "box4 1" "a a a a" "$(box4 a; echo "$REPLY")"
+check "box4 2" "a b a b" "$(box4 'a b'; echo "$REPLY")"
+check "box4 3" "a b c b" "$(box4 'a b c'; echo "$REPLY")"
+check "box4 4" "a b c d" "$(box4 'a b c d'; echo "$REPLY")"
+check "split at top-level commas" "0 1px rgba(0,0,0,0.5)|2px 0 0 red" "$(split_top '0 1px rgba(0,0,0,0.5), 2px 0 0 red'; IFS='|'; echo "${SPLIT[*]}")"
+check "font registered"  "HelveticaNeue-Bold" "$(font_file HelveticaNeue-Bold normal normal; echo "$REPLY")"
+check "font regular"     "/System/Library/Fonts/Supplemental/Georgia.ttf" "$(font_file Georgia normal normal; echo "$REPLY")"
+check "font bold"        "/System/Library/Fonts/Supplemental/Georgia Bold.ttf" "$(font_file Georgia bold normal; echo "$REPLY")"
+check "font italic"      "/System/Library/Fonts/Supplemental/Georgia Italic.ttf" "$(font_file Georgia normal italic; echo "$REPLY")"
+check "font one weight"  "/System/Library/Fonts/Supplemental/DIN Alternate Bold.ttf" "$(font_file 'DIN Alternate' normal normal; echo "$REPLY")"
+check "font unknown"     "1" "$(font_file 'No Such Font' normal normal; echo $?)"
+tracks() { solve_tracks "$@"; echo "$REPLY"; }
+check "tracks fr"          "300 600"         "$(tracks '1fr 2fr' 900 0 '')"
+check "tracks auto fr"     "120 780"         "$(tracks 'auto 1fr' 900 0 '120 0')"
+check "tracks gap"         "440 440"         "$(tracks '1fr 1fr' 900 20 '')"
+check "tracks %"           "252 396 252"     "$(tracks '28% 44% 28%' 900 0 '')"
+check "tracks fixed fr"    "100 800"         "$(tracks '10pmin 1fr' 900 0 '')"
+check "tracks decimal fr"  "300 600"         "$(tracks '0.5fr 1fr' 900 0 '')"
+check "tracks unknown size" "50 30"          "$(tracks 'auto 1fr' -1 0 '50 30')"
+check "tracks overfull"    "1000 0"          "$(tracks '100pmin 1fr' 900 0 '')"
+fails_with "tracks % unknown" "% needs a known size" solve_tracks '50%' -1 0 ''
+
+# --- Engine: errors in layout files, through the script
+B="$HERE/engine/bad"
+bad() { ( cd "$OUT/photos" && BORDERMAGICK_LAYOUTS="$B" "$ROOT/bordermagick" --plan -b "$1" fuji_33.jpg ); }
+fails_with "engine bad unit"    "$B/bad-unit.layout:2: '3pt': unknown unit 'pt'"       bad bad-unit
+fails_with "engine bad font"    "$B/bad-font.layout:3: no font 'No Such Font'"         bad bad-font
+fails_with "engine background"  "background material(marble) is not available yet"    bad bad-bg
+fails_with "engine later item"  "[edge-print] items are not available yet"             bad later-item
+fails_with "engine anchor"      "'middle' is not a photo anchor"                      bad bad-anchor
+fails_with "engine fw side"     "fw can't be used here"                               bad fw-side
+fails_with "engine no room"     "[bottom] has no room"                                bad no-room
+fails_with "engine no column"   "[bottom] has only 1 column(s)"                       bad no-column
+fails_with "engine colour"      "$B/bad-colour.layout:2: unknown colour 'notacolour'"  bad bad-colour
+
+# --- Engine: plans of the test layouts on the test photos
+make_photos "$OUT/photos"
+for f in "$HERE"/engine/*.layout; do
+  l=${f##*/}; l=${l%.layout}
+  check "plan $l" "$(cat "$HERE/engine/$l.plan" 2>/dev/null)" \
+    "$(cd "$OUT/photos" && BORDERMAGICK_LAYOUTS="$HERE/engine" "$ROOT/bordermagick" --plan -b "$l" fuji_33.jpg no_exif.jpg sony_portrait.jpg 2>&1)"
+done
 
 # --- Tags of the generated test photos, through the script
 make_photos "$OUT/photos"

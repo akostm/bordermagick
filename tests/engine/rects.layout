@@ -1,0 +1,19 @@
+# Test: a stroked rectangle on the photo, one under it outside the photo, a gradient frame
+[layout]
+name = rects
+
+[frame]
+padding    = 6.5pmin
+background = gradient(#E3120B, #8A0A05, 90)
+
+[rect line]
+cell        = photo center
+inset       = -1pmin
+fill        = white
+under-photo = yes
+
+[rect box]
+cell         = photo center
+inset        = 4.5pmin
+stroke       = #FFCC00
+stroke-width = 3.8pmin

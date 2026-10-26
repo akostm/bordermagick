@@ -1,0 +1,27 @@
+# Test: text on the photo at an anchor, shrink to fit, shadow, uppercase; a timestamp in a corner
+[layout]
+name = caption
+
+[frame]
+padding    = 4.5pmin
+background = #FBF9F3
+
+[text caption]
+cell           = photo top-center
+margin         = 0.33em 0 0 0
+font           = 17pmin Futura-CondExtraBold
+letter-spacing = 0.05em
+text-transform = uppercase
+color          = #FFFDF6
+text-shadow    = 0.04em 0.04em 0.11em rgba(0,0,0,0.6)
+max-width      = 88%
+overflow       = shrink
+content        = {city|country|filename} and beyond
+
+[text stamp]
+cell        = photo bottom-right
+margin      = 0 3pmin 3pmin 0
+font        = 3.5pmin DIN Condensed
+color       = #FF8A1E
+text-shadow = 0 0 0.3em #FF5A00
+content     = {date:'%y %m %d}

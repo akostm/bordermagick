@@ -1,0 +1,57 @@
+# Test: the classic strip with absolute baselines, logo, $border and paper
+[layout]
+name        = standard
+category    = Test
+description = Classic strip
+
+[frame]
+padding    = 3pmin 3pmin 13pmin
+background = $border
+texture    = paper $paper
+font       = 1.7pmin DIN Alternate
+color      = auto
+
+[bottom]
+columns = 1fr 1fr
+
+[text title]
+cell           = bottom 1
+position       = absolute
+left           = 0
+bottom         = 6.6pmin
+vertical-align = baseline
+font-size      = 4pmin
+content        = {title|city|filename}
+
+[text sub]
+cell           = bottom 1
+position       = absolute
+left           = 0
+bottom         = 3.6pmin
+vertical-align = baseline
+color          = auto-dim
+content        = {place} ∙ {date}
+
+[logo maker]
+cell     = bottom 2
+position = absolute
+right    = 0
+bottom   = 8.8pmin
+height   = 1.8pmin
+
+[text camera]
+cell           = bottom 2
+position       = absolute
+right          = 0
+bottom         = 6.2pmin
+vertical-align = baseline
+content        = {model} ∙ {lens}
+
+[text exposure]
+cell           = bottom 2
+position       = absolute
+right          = 0
+bottom         = 3.6pmin
+vertical-align = baseline
+color          = auto-dim
+content        = {exposure}

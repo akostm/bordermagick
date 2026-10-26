@@ -20,11 +20,12 @@ while [[ -L "$src" ]]; do
   dir=$(cd -P "$(dirname "$src")" && pwd); src=$(readlink "$src"); [[ "$src" == /* ]] || src="$dir/$src"
 done
 BM_DIR=$(cd -P "$(dirname "$src")" && pwd)
-for lib in tags layout; do
+for lib in tags layout engine; do
   [[ -f "$BM_DIR/lib/$lib.sh" ]] || { echo "bordermagick: $BM_DIR/lib/$lib.sh is missing (keep lib/ next to the script)" >&2; exit 2; }
   . "$BM_DIR/lib/$lib.sh"
 done
-LAYOUT_PATH="$BM_HOME/layouts:$BM_DIR/layouts"   # your own layouts first, then the built-in ones
+# Your own layouts first, then the built-in ones (BORDERMAGICK_LAYOUTS: an extra folder in front, for tests)
+LAYOUT_PATH="${BORDERMAGICK_LAYOUTS:+$BORDERMAGICK_LAYOUTS:}$BM_HOME/layouts:$BM_DIR/layouts"
 
 TMP=$(mktemp -d)
 trap 'rm -f "$TMP"/*; rmdir "$TMP"' EXIT
@@ -286,6 +287,9 @@ if [[ "${1:-}" == --dump-layout ]]; then
   layout_load "$2"; layout_dump
   exit 0
 fi
+# --plan: print where a layout puts everything instead of writing the photos
+PLAN=0
+if [[ "${1:-}" == --plan ]]; then PLAN=1; shift; fi
 DOWNLOAD_ALL=0
 BORDER="white"; PAPER=6; SIZE="grow"; META="keep"
 while getopts ":b:p:s:m:LhV" opt; do
@@ -334,8 +338,11 @@ esac
 [[ "$PAPER" =~ ^[0-9]+$ ]] && (( PAPER <= 30 )) ||
   die "invalid paper strength '$PAPER'" "Use a whole number from 0 (off) to 30."
 
-# Border: named styles are fine as-is; anything else must be one colour, or two joined by "-"
-case "$BORDER" in
+# Border: a layout file, a named style, or one colour / two joined by "-" (with the standard layout if
+# there is one)
+LAYOUT=""
+if layout_find "$BORDER" >/dev/null; then LAYOUT=$BORDER; fi
+[[ -n "$LAYOUT" ]] || case "$BORDER" in
   auto|frost|frost-dark|marble|marble-dark|marble-green|marble-beige|terrazzo|linen|contact|museum|museum-white|museum-black|poster|poster-colour|postcard|cover-yellow|cover-red) ;;
   *)
     IFS=- read -r -a parts <<<"$(pastel "$BORDER")"
@@ -345,8 +352,17 @@ case "$BORDER" in
       # (an unknown colour name is only a warning to ImageMagick, so any output counts as failure)
       [[ -n "$c" && -z "$(magick xc:"$c" null: 2>&1)" ]] ||
         die "unknown border '$BORDER'" "'$c' is neither a style nor a colour ImageMagick knows. See the list under -b."
-    done ;;
+    done
+    if layout_find standard >/dev/null; then LAYOUT=standard; fi ;;
 esac
+if [[ "$BORDER" == auto ]] && layout_find standard >/dev/null; then LAYOUT=standard; fi
+if [[ -n "$LAYOUT" ]]; then
+  LY_VAR_paper=$PAPER
+  if [[ "$LAYOUT" == "$BORDER" ]]; then LY_VAR_border=white; else LY_VAR_border=$(pastel "$BORDER"); fi
+  layout_load "$LAYOUT"
+elif (( PLAN )); then
+  die "--plan works with layout files" "$(ly_available)"
+fi
 
 # =====================================================================================================
 # Framing pipeline. One photo goes through these stages in order (frame_photo); each stage reads and
@@ -386,6 +402,10 @@ style_setup() {
     auto) ;;
     *) if [[ "$(pastel "$BORDER")" == *-* ]]; then KIND=gradient; fi ;;   # "colour1-colour2"
   esac
+  # Paper texture (strength PAPER_K) on the plain surfaces
+  PAPER_ON=0; PAPER_K=$PAPER
+  case "$KIND" in solid|gradient|museum|poster|card) (( PAPER > 0 )) && PAPER_ON=1 ;; esac
+  if [[ "$BORDER" == museum-black ]]; then PAPER_K=$(( PAPER / 3 )); fi   # black mat board is smooth; the relief shows strongly on black
 }
 
 # --- 1. Metadata: text lines and maker logo
@@ -485,24 +505,34 @@ layout() {
 
   # Optical sizing: a square badge at a wordmark's height looks tiny, so logos narrower than ~5:1 grow
   # with the square root of how much squarer they are, up to 1.6x (what fits above the camera line)
-  LH=$LOGO_H
-  if [[ -f "$logo" ]]; then
-    LH=$(magick "$logo" -trim -format "%[fx:w/h]" info: |
-      awk -v h=$LOGO_H '{ f = sqrt(5 / $1); if (f < 1) f = 1; if (f > 1.6) f = 1.6; printf "%d", h * f }')
-  fi
+  LH=$(logo_height "$LOGO_H")
   return 0
+}
+
+logo_height() {  # height of a wide wordmark -> height for this logo
+  if [[ -f "$logo" ]]; then
+    magick "$logo" -trim -format "%[fx:w/h]" info: |
+      awk -v h=$1 '{ f = sqrt(5 / $1); if (f < 1) f = 1; if (f > 1.6) f = 1.6; printf "%d", h * f }'
+  else
+    echo "$1"
+  fi
 }
 
 # Text width at a given size (terrazzo's keep-clear boxes), and the largest of several numbers
 text_w() { magick -font "$FONT" -pointsize "$1" label:"$2" -format "%w" info:; }
 max() { printf "%s\n" "$@" | sort -n | tail -1; }
 
+# The photo's average colour, lifted to a light pastel
+auto_colour() {
+  magick "$in" -resize 1x1\! -colorspace HSL -channel G -evaluate multiply 1.4 \
+    -channel B -evaluate set 82% +channel -colorspace sRGB -format "#%[hex:u.p{0,0}]" info:
+}
+
 # --- 3. Background: the full-size canvas the photo is placed on (lets gradients span the whole frame)
 background() {
   # Border colour; "auto" = the photo's average colour, lifted to a light pastel
   if [[ "$BORDER" == auto ]]; then
-    BG=$(magick "$in" -resize 1x1\! -colorspace HSL -channel G -evaluate multiply 1.4 \
-           -channel B -evaluate set 82% +channel -colorspace sRGB -format "#%[hex:u.p{0,0}]" info:)
+    BG=$(auto_colour)
   else
     BG=$(pastel "$BORDER")
   fi
@@ -553,25 +583,29 @@ ink() {
     material) lum=$(magick "$TMP/material.miff" -resize 1x1\! -format "%[fx:luminance]" info:) ;;
     *)        lum=$(magick -size 64x64 "${canvas[@]}" -resize 1x1\! -format "%[fx:luminance]" info:) ;;
   esac
-  if (( $(awk -v l="$lum" 'BEGIN { print (l < 0.5) }') )); then
-    DARK=1; FG="#EEEEEE"; FG2="rgba(255,255,255,0.6)"
-  else
-    DARK=0; FG="#222222"; FG2="rgba(0,0,0,0.5)"
-  fi
+  canvas_ink "$lum"
   if (( FILM )); then FG="$AMBER"; FG2="rgba(242,177,52,0.6)"; fi
   if (( MUSEUM )); then FG="$INK"; FG2="$INK2"; fi
   if (( POSTER )); then FG="$PINK"; FG2="$PINK"; fi
   return 0
 }
 
+# Ink for a background of this luminance (0–1): dark or light text (FG), and a translucent secondary (FG2)
+canvas_ink() {
+  LUM=$1
+  if (( $(awk -v l="$1" 'BEGIN { print (l < 0.5) }') )); then
+    DARK=1; FG="#EEEEEE"; FG2="rgba(255,255,255,0.6)"
+  else
+    DARK=0; FG="#222222"; FG2="rgba(0,0,0,0.5)"
+  fi
+}
+
 # --- 5. Paper texture for solid/gradient borders: directional fibres + faint large-scale mottling,
 # embossed into a grey relief map and hard-light blended (so it shows on pure white as well as on dark
 # colours). Built at half size and scaled up: ~3x faster, and the grain is soft enough that it doesn't show.
 paper() {
-  if [[ "$KIND" == solid || "$KIND" == gradient || "$KIND" == museum || "$KIND" == poster ||
-        "$KIND" == card ]] && (( PAPER > 0 )); then
-    local hw=$(( FW / 2 )) hh=$(( FH / 2 )) k=$PAPER
-    if [[ "$BORDER" == museum-black ]]; then k=$(( PAPER / 3 )); fi   # black mat board is smooth; the relief shows strongly on black
+  if (( PAPER_ON )); then
+    local hw=$(( FW / 2 )) hh=$(( FH / 2 )) k=$PAPER_K
     canvas+=( \( -size ${hw}x${hh} xc:gray50 -attenuate 1 +noise Gaussian -colorspace gray
                   -motion-blur 0x$(awk -v s=$S 'BEGIN { printf "%.1f", s / 3000 }')+30
                   \( -size $(( FW / 40 ))x$(( FH / 40 )) xc:gray50 -attenuate 1 +noise Gaussian -colorspace gray
@@ -722,6 +756,17 @@ add_cover() {
 # their own background (Nikon's yellow band) are left as they are.
 add_logo() {
   [[ -f "$logo" ]] || return 0
+  prepare_logo "$LH" "$TMP/logo.miff"
+  if (( INSET )); then   # engraved like the text: tinted silhouettes nudged up-left and down-right
+    args+=( \( "$TMP/logo.miff" -fill black -colorize 100 -channel A -evaluate multiply 0.45 +channel \)
+            -gravity southeast -geometry +$(( B + o ))+$(( Y_LOGO + o )) -composite
+            \( "$TMP/logo.miff" -fill white -colorize 100 -channel A -evaluate multiply 0.55 +channel \)
+            -gravity southeast -geometry +$(( B - o ))+$(( Y_LOGO - o )) -composite )
+  fi
+  args+=( "$TMP/logo.miff" -gravity southeast -geometry +$B+$Y_LOGO -composite )
+}
+
+prepare_logo() {  # height out: the logo trimmed, recoloured for the background and scaled
   local recolour=()
   if (( DARK )) && [[ "$key" != nikon ]]; then
     recolour=( -channel RGB
@@ -735,15 +780,8 @@ add_logo() {
   # Trim the PNG's transparent padding so the logo is placed by its visible letters. Fully transparent
   # pixels can hide stray RGB (green-grey in fujifilm.png) that resizing bleeds into the edges — reset it
   # to black first. (-colorspace sRGB: some logos are greyscale PNGs, which have no channels to tint.)
-  magick "$logo" -trim +repage -background black -alpha background -colorspace sRGB -resize x"$LH" \
-    ${recolour[@]+"${recolour[@]}"} "$TMP/logo.miff"
-  if (( INSET )); then   # engraved like the text: tinted silhouettes nudged up-left and down-right
-    args+=( \( "$TMP/logo.miff" -fill black -colorize 100 -channel A -evaluate multiply 0.45 +channel \)
-            -gravity southeast -geometry +$(( B + o ))+$(( Y_LOGO + o )) -composite
-            \( "$TMP/logo.miff" -fill white -colorize 100 -channel A -evaluate multiply 0.55 +channel \)
-            -gravity southeast -geometry +$(( B - o ))+$(( Y_LOGO - o )) -composite )
-  fi
-  args+=( "$TMP/logo.miff" -gravity southeast -geometry +$B+$Y_LOGO -composite )
+  magick "$logo" -trim +repage -background black -alpha background -colorspace sRGB -resize x"$1" \
+    ${recolour[@]+"${recolour[@]}"} "$2"
 }
 
 # --- 9. Contact sheet edge print along the top border: the film stock like on real film — maker, film
@@ -812,6 +850,11 @@ for in in "$@"; do
   idx=$(( idx + 1 ))
   if [[ ! -f "$in" ]]; then echo "$ME: no such file: $in (skipped)" >&2; status=1; continue; fi
   out="${in%.*}_${tag}_${SIZE}.jpg"
-  frame_photo
+  if [[ -n "$LAYOUT" ]]; then
+    (( PLAN && $# > 1 )) && echo "== $in"
+    frame_layout
+  else
+    frame_photo
+  fi
 done
 exit $status

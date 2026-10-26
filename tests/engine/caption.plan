@@ -1,0 +1,14 @@
+== fuji_33.jpg
+frame - 0 0 954 654
+photo - 27 27 900 600
+text caption 91 60 771 103
+text stamp 848 586 61 23
+== no_exif.jpg
+frame - 0 0 872 872
+photo - 36 36 800 800
+text caption 84 80 703 89
+== sony_portrait.jpg
+frame - 0 0 654 954
+photo - 27 27 600 900
+text caption 72 60 509 69
+text stamp 548 886 61 23

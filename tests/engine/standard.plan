@@ -1,0 +1,23 @@
+== fuji_33.jpg
+frame - 0 0 936 696
+photo - 18 18 900 600
+band bottom 18 618 900 78
+text title 18 627 122 30
+text sub 18 661 97 14
+logo maker 858 634 60 10
+text camera 764 645 154 14
+text exposure 777 661 141 14
+== no_exif.jpg
+frame - 0 0 848 928
+photo - 24 24 800 800
+band bottom 24 824 800 104
+text title 24 836 99 40
+== sony_portrait.jpg
+frame - 0 0 636 996
+photo - 18 18 600 900
+band bottom 18 918 600 78
+text title 18 927 65 30
+text sub 18 961 50 14
+logo maker 561 934 57 10
+text camera 478 945 140 14
+text exposure 489 961 129 14

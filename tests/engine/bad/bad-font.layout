@@ -1,0 +1,6 @@
+[frame]
+padding = 3pmin
+font = 2pmin No Such Font
+
+[text t]
+content = x

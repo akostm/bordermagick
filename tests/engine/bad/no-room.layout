@@ -1,0 +1,5 @@
+[frame]
+padding = 3pmin 3pmin 0
+
+[text t]
+content = x

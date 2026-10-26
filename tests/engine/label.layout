@@ -1,0 +1,41 @@
+# Test: a wall label stacked in an auto column, margins, colours and font inheritance
+[layout]
+name     = label
+category = Test
+
+[frame]
+padding    = 14pmin 14pmin 26pmin
+background = #F3F0E8
+texture    = paper $paper
+font       = 2pmin Georgia
+color      = #6E6A64
+
+[bottom]
+columns     = 1fr auto
+padding     = 5.5pmin 0 0 0
+align-items = start
+
+[text title]
+cell    = bottom 2
+font    = bold 2.6pmin Georgia
+color   = #2A2826
+content = {title|city|filename}
+
+[text where]
+cell       = bottom 2
+font-style = italic
+color      = #2A2826
+margin     = 0.6pmin 0 1.5pmin 0
+content    = {place}[, {date:%Y}]
+
+[text medium]
+cell    = bottom 2
+content = Digital photograph[, {brand} {film}]
+
+[text camera]
+cell    = bottom 2
+content = {body} ∙ {lens}
+
+[text exposure]
+cell    = bottom 2
+content = {exposure}

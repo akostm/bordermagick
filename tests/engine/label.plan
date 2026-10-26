@@ -1,0 +1,24 @@
+== fuji_33.jpg
+frame - 0 0 1068 840
+photo - 84 84 900 600
+band bottom 84 684 900 156
+text title 729 717 98 19
+text where 729 739 76 15
+text medium 729 763 101 15
+text camera 729 778 255 15
+text exposure 729 793 194 15
+== no_exif.jpg
+frame - 0 0 1024 1120
+photo - 112 112 800 800
+band bottom 112 912 800 208
+text title 775 956 84 25
+text medium 775 981 137 20
+== sony_portrait.jpg
+frame - 0 0 768 1140
+photo - 84 84 600 900
+band bottom 84 984 600 156
+text title 466 1017 52 19
+text where 466 1039 35 15
+text medium 466 1063 101 15
+text camera 466 1078 218 15
+text exposure 466 1093 180 15
