@@ -14,6 +14,17 @@ AMBER="#F2B134"                                                        # contact
 SERIF="/System/Library/Fonts/Supplemental/Georgia"                     # museum label: + .ttf / Bold / Italic
 SEP="∙"
 
+# The script's own folder (through symlinks, e.g. a link in /usr/local/bin), for lib/
+src=$0
+while [[ -L "$src" ]]; do
+  dir=$(cd -P "$(dirname "$src")" && pwd); src=$(readlink "$src"); [[ "$src" == /* ]] || src="$dir/$src"
+done
+BM_DIR=$(cd -P "$(dirname "$src")" && pwd)
+for lib in tags; do
+  [[ -f "$BM_DIR/lib/$lib.sh" ]] || { echo "bordermagick: $BM_DIR/lib/$lib.sh is missing (keep lib/ next to the script)" >&2; exit 2; }
+  . "$BM_DIR/lib/$lib.sh"
+done
+
 TMP=$(mktemp -d)
 trap 'rm -f "$TMP"/*; rmdir "$TMP"' EXIT
 
@@ -108,7 +119,7 @@ pastel() {  # name -> hex for the Instax-style presets; anything else passes thr
 }
 
 ME=$(basename "$0")
-VERSION="1.2.0"
+VERSION="1.2.1"
 help() {
   cat <<HELP
 $ME — frame photos with a border, title, camera info and maker logo
@@ -257,6 +268,18 @@ die() {  # message [hint]
 
 [[ "${1:-}" == --help ]] && { help; exit 0; }
 [[ "${1:-}" == --version ]] && { echo "$ME $VERSION"; exit 0; }
+# The tags a photo has (the values bordermagick reads from it)
+if [[ "${1:-}" == --tags ]]; then
+  shift; (( $# )) || die "--tags needs a photo"
+  idx=0
+  for in in "$@"; do
+    idx=$(( idx + 1 ))
+    [[ -f "$in" ]] || die "no such file: $in"
+    (( $# > 1 )) && echo "== $in"
+    read_tags "$in" "$idx"; print_tags
+  done
+  exit 0
+fi
 DOWNLOAD_ALL=0
 BORDER="white"; PAPER=6; SIZE="grow"; META="keep"
 while getopts ":b:p:s:m:LhV" opt; do
@@ -319,31 +342,6 @@ case "$BORDER" in
     done ;;
 esac
 
-# Fujifilm film simulation as printed on film edges (PROVIA, CLASSIC CHROME …); empty if unknown.
-# Black-and-white modes are recorded under Saturation, colour ones under FilmMode.
-film_name() {
-  local sat fm
-  sat=$(exiftool -s3 -FujiFilm:Saturation "$1")
-  case "$sat" in
-    "Acros Red"*) echo "ACROS+R"; return ;;  "Acros Yellow"*) echo "ACROS+Ye"; return ;;
-    "Acros Green"*) echo "ACROS+G"; return ;; Acros*) echo "ACROS"; return ;;
-    *Sepia*) echo "SEPIA"; return ;;
-    "B&W Red"*) echo "MONOCHROME+R"; return ;; "B&W Yellow"*) echo "MONOCHROME+Ye"; return ;;
-    "B&W Green"*) echo "MONOCHROME+G"; return ;; *"B&W"*) echo "MONOCHROME"; return ;;
-  esac
-  fm=$(exiftool -s3 -FujiFilm:FilmMode "$1")
-  case "$fm" in
-    "") ;;
-    *Provia*) echo "PROVIA" ;;            *Astia*) echo "ASTIA" ;;            *Velvia*) echo "VELVIA" ;;
-    "Pro Neg. Std"*) echo "PRO NEG. STD" ;; "Pro Neg. Hi"*) echo "PRO NEG. HI" ;;
-    "Classic Chrome"*) echo "CLASSIC CHROME" ;;
-    *"Bleach Bypass"*) echo "ETERNA BLEACH BYPASS" ;; Eterna*) echo "ETERNA" ;;
-    "Classic Neg"*) echo "CLASSIC NEG." ;; "Nostalgic Neg"*) echo "NOSTALGIC NEG." ;;
-    Reala*) echo "REALA ACE" ;;
-    *) sed -E 's#^F[0-9]+[a-z]?/##' <<<"$fm" | tr '[:lower:]' '[:upper:]' ;;   # older "F1/Studio Portrait" etc.
-  esac
-}
-
 # =====================================================================================================
 # Framing pipeline. One photo goes through these stages in order (frame_photo); each stage reads and
 # sets plain global variables. A border style is a set of switches (style_setup), so a new style is
@@ -386,63 +384,27 @@ style_setup() {
 
 # --- 1. Metadata: text lines and maker logo
 read_meta() {
-  make=$(exiftool -s3 -Make "$in")
-  model=$(exiftool -s3 -Model "$in")
-  # LensID (exiftool's offline lens database) first; fall back to the raw EXIF LensModel,
-  # adding the space some makers omit between focal length and aperture ("18-55mmF2.8" -> "18-55mm F2.8")
-  lens=$(exiftool -s3 -LensID "$in")
-  if [[ -z "$lens" || "$lens" == Unknown* ]]; then
-    lens=$(exiftool -s3 -LensModel "$in" | sed -E 's/([0-9])mm ?([Ff]\/?[0-9])/\1mm \2/')
-  fi
+  read_tags "$in" "$idx"
+  make=$T_make; model=$T_model; lens=$T_lens; key=$T_key; city=$T_city; date=$T_date
   # Settings line from whatever the photo has ("35.8 mm ∙ ƒ/11.0 ∙ 1/340s ∙ ISO 200"); missing values are
   # left out. The contact sheet prints the ISO in the film edge instead.
-  local fl fn et iso parts=()
-  fl=$(exiftool -s3 -FocalLength "$in" | sed 's/\.0//'); fn=$(exiftool -s3 -FNumber "$in")
-  et=$(exiftool -s3 -ExposureTime "$in"); iso=$(exiftool -s3 -ISO "$in")
-  [[ -n "$fl" ]] && parts+=( "$fl" )
-  [[ -n "$fn" ]] && parts+=( "ƒ/$fn" )
-  [[ -n "$et" ]] && parts+=( "${et}s" )
-  if [[ -n "$iso" ]] && (( ! FILM )); then parts+=( "ISO $iso" ); fi
-  info=""
-  for p in ${parts[@]+"${parts[@]}"}; do info="${info:+$info $SEP }$p"; done
+  if (( FILM )); then info=$(join_sep "$T_focal" "$T_aperture" "$T_shutter"); else info=$T_exposure; fi
   # Kept separately for layouts that split the settings over two lines (poster)
-  EXP1=$(join_sep "$fl" "${fn:+ƒ/$fn}"); EXP2=$(join_sep "${et:+${et}s}" "${iso:+ISO $iso}")
+  EXP1=$(join_sep "$T_focal" "$T_aperture"); EXP2=$(join_sep "$T_shutter" "$T_iso")
   camera="$model${lens:+ $SEP $lens}"
 
   # Title: Title tag, else City, else the file name. The line below shows city and date,
   # minus the city when it's already the title.
-  city=$(exiftool -s3 -City "$in")
-  date=$(exiftool -s3 -d "%-d %B %Y" -DateTimeOriginal "$in")
-  title=$(exiftool -s3 -Title "$in")
-  place="$city"
-  if [[ -z "$title" && -n "$city" ]]; then title="$city"; place=""; fi
-  if [[ -z "$title" ]]; then title=$(basename "$in"); title="${title%.*}"; fi
+  title=${T_title:-${T_city:-$T_filename}}
+  place=$T_place
   sub="$place${place:+${date:+ $SEP }}$date"
 
-  # "NIKON CORPORATION" -> nikon, "FUJIFILM" -> fujifilm, etc. Newer Pentax bodies report
-  # "RICOH IMAGING COMPANY" as the maker, so the model decides there.
-  key=$(awk '{print tolower($1)}' <<<"$make")
-  [[ "$key" == ricoh && "$model" == PENTAX* ]] && key=pentax
-  [[ "$key" == eastman ]] && key=kodak   # "EASTMAN KODAK COMPANY"
-  if [[ "$key" == apple ]]; then          # iPhone / iPad have their own wordmarks
-    case "$model" in iPhone*) key=iphone ;; iPad*) key=ipad ;; esac
-  fi
   logo=""
   if (( LOGO_ON )); then
     logo="$LOGO_DIR/$key.png"
     if [[ -n "$key" ]]; then fetch_logo "$key"; fi
   fi
   return 0
-}
-
-# Join the non-empty arguments with " ∙ "
-join_sep() { local out="" a; for a in "$@"; do [[ -n "$a" ]] && out="${out:+$out $SEP }$a"; done; echo "$out"; }
-
-# Frame number: the last number in the file name ("…_33.jpg" -> 33), else the photo's place in the batch
-frame_number() {
-  local num
-  num=$(basename "${in%.*}" | { grep -oE '[0-9]+' || true; } | tail -1)
-  if [[ -n "$num" ]]; then echo $(( 10#$num )); else echo "$idx"; fi
 }
 
 # Poster: everything is measured from the sheet width (photo width + margins), and the text is rendered
@@ -472,8 +434,7 @@ poster_layout() {
       -interline-spacing $(( PPS / 4 )) -size $(( $1 - PPS ))x caption:"$2" "$3"
   }
   pcol $cw1 "$(printf '%s\n%s' "$place" "$date" | sed '/^$/d')" "$TMP/pc1.miff"
-  camera_body
-  pcol $cw2 "$(printf '%s\n%s' "$BODY" "$lens" | sed '/^$/d')" "$TMP/pc2.miff"
+  pcol $cw2 "$(printf '%s\n%s' "$T_body" "$lens" | sed '/^$/d')" "$TMP/pc2.miff"
   pcol $cw3 "$(printf '%s\n%s' "$EXP1" "$EXP2" | sed '/^$/d')" "$TMP/pc3.miff"
   PCX=( $m $(( m + cw1 )) $(( m + cw1 + cw2 )) )
   gap=$(pu 45); rule=$(( sw / 600 + 2 ))
@@ -682,23 +643,11 @@ add_text() {
 #   Digital photograph, Fujifilm Provia           medium: the film simulation, if any
 #   Fujifilm X-T20 ∙ XF18-55mm F2.8-4 R LM OIS    camera and lens
 #   35.8 mm ∙ ƒ/11.0 ∙ 1/340s ∙ ISO 200           exposure
-# Camera body with the brand in front unless the model already names it: "Fujifilm X-T20", "Sony ILCE-7M4",
-# but "Canon EOS R6", "LEICA Q3". Sets BRAND and BODY.
-camera_body() {
-  BRAND=""; [[ -n "$key" ]] && BRAND=$(brand_name "$key" | awk '{print $1}')
-  [[ "$key" == om ]] && BRAND="OM System"
-  BODY="$model"
-  if [[ -n "$BRAND" && -n "$model" ]] && ! grep -qi "^$(awk '{print $1}' <<<"$make")" <<<"$model" &&
-     ! grep -qi "^$key" <<<"$model"; then BODY="$BRAND $model"; fi
-  return 0
-}
-titlecase() { perl -CS -Mutf8 -pe 's/(\w+)/\u\L$1/g' <<<"$1"; }   # "PRO NEG. HI" -> "Pro Neg. Hi", "ACROS+R" -> "Acros+R"
 add_label() {
-  local year brand body fm medium where p1 p2 lines=() lw
-  year=$(exiftool -s3 -d %Y -DateTimeOriginal "$in")
+  local year brand=$T_brand body=$T_body medium where p1 p2 lines=() lw
+  year=$(tag_date %Y)
   where="$place${place:+${year:+, }}$year"
-  camera_body; brand=$BRAND; body=$BODY
-  fm=$(film_name "$in"); medium="Digital photograph${fm:+, $brand $(titlecase "$fm")}"
+  medium="Digital photograph${T_film:+, $brand $T_film}"
   p1=$(u 26); p2=$(u 20)
   lines+=( \( -font "$SERIF Bold.ttf" -pointsize $p1 -fill "$FG" label:"$title" \) )
   [[ -n "$where" ]] && lines+=( \( -size 1x$(( p2 / 3 )) xc:none +size \)
@@ -717,7 +666,7 @@ add_label() {
 add_poster() {
   local y0=$(( TOPB + H )) i
   args+=( -fill "$FG" -font HelveticaNeue-Medium -pointsize $PPS -gravity northeast
-          -annotate +$B+$(( B / 2 - PPS / 2 )) "No. $(frame_number)"
+          -annotate +$B+$(( B / 2 - PPS / 2 )) "No. $T_frame"
           -gravity northwest "$TMP/ptitle.miff" -geometry +$B+$(( y0 + PY_TITLE )) -composite
           -draw "rectangle $B,$(( y0 + PY_RULE )) $(( FW - B - 1 )),$(( y0 + PY_RULE + PRULE - 1 ))" )
   for i in 1 2 3; do
@@ -730,8 +679,7 @@ add_poster() {
 # shrinks to fit the photo width.
 add_caption() {
   local name pc k d top maxw w
-  name=$(exiftool -s3 -City "$in")
-  [[ -z "$name" ]] && name=$(exiftool -s3 -Country "$in")
+  name=${T_city:-$T_country}
   [[ -n "$name" ]] || return 0
   name=$(upper "$name")
   pc=$(u 170); maxw=$(( W * 88 / 100 ))
@@ -801,9 +749,9 @@ add_edge_print() {
     om) maker="OM SYSTEM" ;; iphone|ipad) maker="APPLE" ;;
     *) maker=$(tr '[:lower:]' '[:upper:]' <<<"$key") ;;
   esac
-  iso=$(exiftool -s3 -ISO "$in")
-  film=$(echo $maker $(film_name "$in") ${iso:+ISO $iso})   # (echo joins the non-empty parts)
-  n=$(frame_number)
+  iso=$X_ISO
+  film=$(echo $maker $T_FILM ${iso:+ISO $iso})   # (echo joins the non-empty parts)
+  n=$T_frame
   pe=$PS; tri=$(( pe * 60 / 100 ))                          # same size as the other text; triangle size
   y=$(( B * 85 / 100 )); base=$(( FH - y - pe * 50 / 100 ))  # y = centre of the row, from the top
   args+=( -fill "$AMBER" -stroke none -font "$FONT_COND" -pointsize $pe -gravity southwest

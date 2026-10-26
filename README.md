@@ -176,6 +176,14 @@ tests/render.sh compare      # after it: everything identical? differences are l
 
 Real photos can be added as arguments. Renders go to `tests/out/` (not committed).
 
+`tests/unit.sh` runs the quick checks of the code in `lib/` (no renders):
+
+```bash
+tests/unit.sh
+```
+
+The script loads its helpers from `lib/`, so keep that folder next to `bordermagick` (a symlink to the script is fine).
+
 ## License
 
 [MIT](LICENSE)
