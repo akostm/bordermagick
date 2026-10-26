@@ -1,6 +1,6 @@
 # bordermagick — layout engine: turns a loaded layout (lib/layout.sh) into a frame. See docs/layouts.md.
 # Sourced by bordermagick; only defines functions. Uses the script's helpers (prepare_logo, logo_height,
-# auto_colour, canvas_ink, paper, upper, titlecase, die) and the tags (lib/tags.sh).
+# auto_colour, canvas_ink, paper, upper, titlecase, im_text, die) and the tags (lib/tags.sh).
 #
 # Per photo: ly_resolve (units, text, grid -> a box per item), then ly_plan (print) or ly_draw (args for
 # the one magick command that write_out runs). Item state lives in I_<item>__<field> variables.
@@ -16,8 +16,6 @@ lerr() {  # section key message: an error at the line the value came from
 ist() { printf -v "I_${1//-/_}__$2" '%s' "$3"; }               # item field value
 igt() { local v="I_${1//-/_}__$2"; REPLY=${!v-}; }              # item field -> REPLY
 
-# Text for ImageMagick: it reads a leading @ as a file name and eats backslashes
-im_text() { local t=${1//\\/\\\\}; [[ "$t" == @* ]] && t="\\$t"; REPLY=$t; }
 
 # =====================================================================================================
 # Units
@@ -263,7 +261,7 @@ ly_text_setup() {  # item
 ly_text_render() {  # item [size] [wrap-width]
   local id=$1 size wrap=${3:-} t font fill w h kern=0 ils=0 lh f opts
   igt "$id" size; size=${2:-$REPLY}
-  igt "$id" text; im_text "$REPLY"; t=$REPLY
+  igt "$id" text; t=$(im_text "$REPLY")
   igt "$id" font; font=$REPLY; igt "$id" fill; fill=$REPLY
   PX_EM=$size PX_REF=""
   tprop "$id" letter-spacing; [[ -n "$REPLY" ]] && { px "$REPLY" "$TP_SEC" "$TP_KEY"; kern=$REPLY; }
@@ -299,7 +297,7 @@ ly_text_shadows() {  # item
   local id=$1 t opts=() wrap ils k s d1 d2 bl col p sig shs=() i=0 f ssec
   tprop "$id" text-shadow; [[ -n "$REPLY" ]] || { ist "$id" shadows ""; return 0; }
   ssec=$TP_SEC; split_top "$REPLY"
-  igt "$id" text; im_text "$REPLY"; t=$REPLY
+  igt "$id" text; t=$(im_text "$REPLY")
   igt "$id" psize; PX_EM=$REPLY PX_REF=""
   opts=( -background none )
   igt "$id" font; opts+=( -font "$REPLY" -pointsize "$PX_EM" )
@@ -742,7 +740,7 @@ ly_draw() {
       text)
         igt "$id" annot; a=$REPLY
         if [[ -n "$a" ]]; then
-          igt "$id" font; f=$REPLY; igt "$id" text; im_text "$REPLY"; s=$REPLY
+          igt "$id" font; f=$REPLY; igt "$id" text; s=$(im_text "$REPLY")
           local k; igt "$id" kern; k=$REPLY
           igt "$id" psize; local ps=$REPLY; igt "$id" fill
           args+=( -font "$f" -pointsize "$ps" -fill "$REPLY" )
