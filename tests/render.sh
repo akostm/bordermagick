@@ -42,6 +42,8 @@ CASES=(
   "marble|-b marble"  "marble-dark|-b marble-dark" "marble-green|-b marble-green"
   "marble-beige|-b marble-beige" "terrazzo|-b terrazzo" "linen|-b linen" "contact|-b contact"
   "museum|-b museum"  "museum-white|-b museum-white" "museum-black|-b museum-black"
+  "poster|-b poster"  "poster-colour|-b poster-colour" "postcard|-b postcard"
+  "cover-yellow|-b cover-yellow" "cover-red|-b cover-red"
   "fit|-s fit"        "fhd|-s fhd -b marble" "px500|-s 500 -b contact" "strip|-m strip -b sunset"
 )
 

@@ -22,6 +22,13 @@ Built on [ImageMagick](https://imagemagick.org), which draws every frame, textur
 </p>
 
 <p align="center">
+  <img src="examples/poster.jpg" alt="Swiss-style poster" width="21%">
+  <img src="examples/poster-colour.jpg" alt="Poster in the photo's own colour" width="21%">
+  <img src="examples/postcard.jpg" alt="Retro travel postcard" width="56%">
+  <br><code>-b poster</code> · <code>-b poster-colour</code> · <code>-b postcard</code>
+</p>
+
+<p align="center">
   <img src="examples/marble-dark.jpg" alt="Dark marble border" width="49%">
   <img src="examples/contact.jpg" alt="Film contact sheet border" width="49%">
   <br><code>-b marble-dark</code> · <code>-b contact</code>
@@ -38,7 +45,7 @@ Built on [ImageMagick](https://imagemagick.org), which draws every frame, textur
 - **Title** from the photo's Title tag, else its city, else the file name, with place and date underneath.
 - **Camera, lens and exposure** (`X-T20 ∙ XF18-55mm F2.8-4 R LM OIS`, `35.8 mm ∙ ƒ/11.0 ∙ 1/340s ∙ ISO 200`). Lens names come from exiftool's lens database.
 - **Maker logo**, downloaded once from Wikimedia Commons and kept for offline use (19 brands, or add your own PNG).
-- **Border styles:** solid colours and pastels, gradients, frosted glass, marble (white, dark, green, beige), terrazzo, linen, a museum mount with a gallery wall label (warm off-white, white or black mat), and a film contact sheet showing the Fujifilm film simulation (`FUJIFILM PROVIA ISO 200 ▶ 33 ▶ 33A ▶ 34`).
+- **Border styles:** solid colours and pastels, gradients, frosted glass, marble (white, dark, green, beige), terrazzo, linen, a museum mount with a gallery wall label (warm off-white, white or black mat), a Swiss-style poster (off-white or in the photo's own colour), a retro travel postcard, two text-free magazine-cover frames, and a film contact sheet showing the Fujifilm film simulation (`FUJIFILM PROVIA ISO 200 ▶ 33 ▶ 33A ▶ 34`).
 - **Sizes:** full resolution, keep the original's long edge, or 4K / 2K / Full HD.
 - Everything is generated locally; the photo never leaves your machine.
 
@@ -70,7 +77,7 @@ Each photo is written next to the original as `<photo>_<border>_<size>.jpg`, e.g
 
 | Option | Values |
 |---|---|
-| `-b` border | `white` (default), `black`, `cream`, `pink`, `mint`, `sky`, `lemon`, `lilac`, any colour; `auto`; `sunset`, `ocean`, `aurora`, `peach`, `dusk` or two colours `'#A-#B'`; `frost`, `frost-dark`; `marble`, `marble-dark`, `marble-green`, `marble-beige`, `terrazzo`; `linen`; `contact`; `museum`, `museum-white`, `museum-black` |
+| `-b` border | `white` (default), `black`, `cream`, `pink`, `mint`, `sky`, `lemon`, `lilac`, any colour; `auto`; `sunset`, `ocean`, `aurora`, `peach`, `dusk` or two colours `'#A-#B'`; `frost`, `frost-dark`; `marble`, `marble-dark`, `marble-green`, `marble-beige`, `terrazzo`; `linen`; `contact`; `museum`, `museum-white`, `museum-black`; `poster`, `poster-colour`, `postcard`, `cover-yellow`, `cover-red` |
 | `-p` paper texture | `0`–`30`, default `6` (solid and gradient borders) |
 | `-s` size | `grow` (default), `fit`, `4k`, `2k`, `fhd`, or a long-side pixel count |
 | `-m` metadata | `keep` (default) or `strip` |
@@ -110,10 +117,11 @@ Open **Shortcuts → Settings… → Advanced** and turn on **Allow Running Scri
    | `Stone` | `marble, marble-beige, marble-dark, marble-green, terrazzo` |
    | `Fabric` | `linen` |
    | `Gallery` | `museum, museum-white, museum-black` |
+   | `Print` | `poster, poster-colour, postcard, cover-yellow, cover-red` |
    | `Darkroom` | `contact` |
 
 2. **Set Variable** `Styles` to *Dictionary*.
-3. **List** with the categories in the order you want them shown: `Solid`, `Auto`, `Gradient`, `Glass`, `Stone`, `Fabric`, `Gallery`, `Darkroom`, `Custom…`
+3. **List** with the categories in the order you want them shown: `Solid`, `Auto`, `Gradient`, `Glass`, `Stone`, `Fabric`, `Gallery`, `Print`, `Darkroom`, `Custom…`
 4. **Choose from List** — prompt `Border style`.
 5. **If** *Selected Item* **is** `Custom…`
    - **Ask for Input** — Text, prompt `Colour or gradient, e.g. #2B4C7E or #FFD6E0-#B5E2FA`

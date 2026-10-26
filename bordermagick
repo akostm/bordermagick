@@ -17,6 +17,19 @@ SEP="∙"
 TMP=$(mktemp -d)
 trap 'rm -f "$TMP"/*; rmdir "$TMP"' EXIT
 
+# Some macOS typefaces live in collection files (.ttc) holding several weights; ImageMagick can only pick
+# one of those through its font registry. Register the faces we use in a private type.xml (face = index
+# in the collection) and point ImageMagick at it. Used as -font HelveticaNeue-Bold etc.
+cat > "$TMP/type.xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<typemap>
+  <type name="HelveticaNeue-Bold"   glyphs="/System/Library/Fonts/HelveticaNeue.ttc" face="1"/>
+  <type name="HelveticaNeue-Medium" glyphs="/System/Library/Fonts/HelveticaNeue.ttc" face="10"/>
+  <type name="Futura-CondExtraBold" glyphs="/System/Library/Fonts/Supplemental/Futura.ttc" face="4"/>
+</typemap>
+XML
+export MAGICK_CONFIGURE_PATH="$TMP"
+
 # Testing hook: BORDERMAGICK_SEED fixes the random textures (marble, terrazzo, linen, frost, paper),
 # so renders are reproducible pixel for pixel. mg = magick with that seed applied.
 SEEDOPT=()
@@ -95,7 +108,7 @@ pastel() {  # name -> hex for the Instax-style presets; anything else passes thr
 }
 
 ME=$(basename "$0")
-VERSION="1.1.0"
+VERSION="1.2.0"
 help() {
   cat <<HELP
 $ME — frame photos with a border, title, camera info and maker logo
@@ -118,6 +131,15 @@ Title tag, else its City, else the file name; the line below shows city and date
                  Stone:      marble, marble-dark, marble-green, marble-beige, terrazzo
                              (photo and lettering inset into the stone)
                  Fabric:     linen
+                 Print:      poster, poster-colour   Swiss-style poster: photo, huge title in
+                             Helvetica Neue, and a grid of place/date, camera, exposure; on
+                             off-white paper, or on the photo's main colour
+                             cover-yellow   magazine-cover look: a yellow rectangle inset on
+                             the full-bleed photo (same size as the original, no text)
+                             cover-red      magazine-cover look: red border with a thin white
+                             inner line around the photo (no text)
+                             postcard   white-bordered travel postcard: the city (else the
+                             country) in big retro capitals across the top (Futura Condensed)
                  Gallery:    museum, museum-white, museum-black   wide mat (warm off-white,
                              white or black) with a bevelled opening and a museum wall label:
                              title, place and year, medium (film simulation), camera, exposure
@@ -285,7 +307,7 @@ esac
 
 # Border: named styles are fine as-is; anything else must be one colour, or two joined by "-"
 case "$BORDER" in
-  auto|frost|frost-dark|marble|marble-dark|marble-green|marble-beige|terrazzo|linen|contact|museum|museum-white|museum-black) ;;
+  auto|frost|frost-dark|marble|marble-dark|marble-green|marble-beige|terrazzo|linen|contact|museum|museum-white|museum-black|poster|poster-colour|postcard|cover-yellow|cover-red) ;;
   *)
     IFS=- read -r -a parts <<<"$(pastel "$BORDER")"
     (( ${#parts[@]} <= 2 )) ||
@@ -336,8 +358,11 @@ u() { echo $(( S * $1 / 1000 )); }   # tenths of a percent of the photo's short 
 #   LOGO_ON  maker logo above the camera info
 #   FILM     contact-sheet layout: edge print, one condensed uppercase size, no logo
 #   MUSEUM   mat-board layout: wide bottom-weighted mat, bevelled opening, wall label instead of the strip
+#   POSTER   poster layout: photo, huge title, rule and a three-column grid below
+#   POSTCARD postcard front: even white border, caption written on the photo
+#   COVER    magazine-cover frame without text: yellow (inset rectangle) or red (border)
 style_setup() {
-  KIND=solid; INSET=0; LOGO_ON=1; FILM=0; MUSEUM=0
+  KIND=solid; INSET=0; LOGO_ON=1; FILM=0; MUSEUM=0; POSTER=0; POSTCARD=0; COVER=""
   case "$BORDER" in
     frost|frost-dark) KIND=frost ;;
     marble|marble-dark|marble-green|marble-beige|terrazzo) KIND=material; INSET=1 ;;
@@ -350,6 +375,10 @@ style_setup() {
         museum-white) MAT="#FAFAF8"; CORE="#FFFFFF"; INK="#2A2826"; INK2="#6E6A64" ;;
         museum-black) MAT="#161616"; CORE="#ECEAE4"; INK="#E8E6E1"; INK2="#A39F98" ;;
       esac ;;
+    poster|poster-colour) KIND=poster; LOGO_ON=0; POSTER=1 ;;
+    postcard) KIND=card; LOGO_ON=0; POSTCARD=1 ;;
+    cover-yellow) KIND=cover; LOGO_ON=0; COVER=yellow ;;
+    cover-red)    KIND=cover; LOGO_ON=0; COVER=red ;;
     auto) ;;
     *) if [[ "$(pastel "$BORDER")" == *-* ]]; then KIND=gradient; fi ;;   # "colour1-colour2"
   esac
@@ -376,6 +405,8 @@ read_meta() {
   if [[ -n "$iso" ]] && (( ! FILM )); then parts+=( "ISO $iso" ); fi
   info=""
   for p in ${parts[@]+"${parts[@]}"}; do info="${info:+$info $SEP }$p"; done
+  # Kept separately for layouts that split the settings over two lines (poster)
+  EXP1=$(join_sep "$fl" "${fn:+ƒ/$fn}"); EXP2=$(join_sep "${et:+${et}s}" "${iso:+ISO $iso}")
   camera="$model${lens:+ $SEP $lens}"
 
   # Title: Title tag, else City, else the file name. The line below shows city and date,
@@ -404,6 +435,57 @@ read_meta() {
   return 0
 }
 
+# Join the non-empty arguments with " ∙ "
+join_sep() { local out="" a; for a in "$@"; do [[ -n "$a" ]] && out="${out:+$out $SEP }$a"; done; echo "$out"; }
+
+# Frame number: the last number in the file name ("…_33.jpg" -> 33), else the photo's place in the batch
+frame_number() {
+  local num
+  num=$(basename "${in%.*}" | { grep -oE '[0-9]+' || true; } | tail -1)
+  if [[ -n "$num" ]]; then echo $(( 10#$num )); else echo "$idx"; fi
+}
+
+# Poster: everything is measured from the sheet width (photo width + margins), and the text is rendered
+# first because its height sets the sheet height. Paper and ink: off-white with black, or the photo's most
+# common colour (deepened so type stays bold on it) with black or white, whichever reads better.
+poster_layout() {
+  local m=$(( W * 6 / 100 )) sw pt cw1 cw2 cw3 gap rule ch
+  sw=$(( W + 2 * m ))
+  pu() { echo $(( sw * $1 / 1000 )); }
+  if [[ "$BORDER" == poster ]]; then
+    PBG="#F6F5F1"; PINK="#111111"
+  else
+    PBG=$(magick "$in" -resize 200x200 -kmeans 5 -format %c histogram:info: | sort -rn | head -1 | grep -oE '#[0-9A-Fa-f]{6}')
+    PBG=$(magick xc:"$PBG" -modulate 80,130 -format "#%[hex:u.p{0,0}]" info:)
+    if (( $(magick xc:"$PBG" -format "%[fx:luminance<0.45]" info:) )); then PINK="#FFFFFF"; else PINK="#111111"; fi
+  fi
+  # Title: huge, left aligned, wrapping to the sheet width, tight leading. (The tight leading also shortens
+  # the last line and would clip descenders and underscores, so a blank line is added and trimmed away.)
+  pt=$(pu 110)
+  magick -background none -fill "$PINK" -font HelveticaNeue-Bold -pointsize $pt -kerning $(( -pt / 40 )) \
+    -interline-spacing $(( -pt * 18 / 100 )) -size $(( sw - 2 * m ))x caption:"$title"$'\n'" " -trim +repage "$TMP/ptitle.miff"
+  # Grid: place and date | camera and lens (widest) | exposure; long lines wrap within their column
+  PPS=$(pu 22); cw1=$(( (sw - 2 * m) * 28 / 100 )); cw2=$(( (sw - 2 * m) * 44 / 100 )); cw3=$(( sw - 2 * m - cw1 - cw2 ))
+  pcol() {  # width text out (an empty column becomes a blank 1-pixel image)
+    if [[ -z "$2" ]]; then magick -size 1x1 xc:none "$3"; return; fi
+    magick -background none -fill "$PINK" -font HelveticaNeue-Medium -pointsize $PPS \
+      -interline-spacing $(( PPS / 4 )) -size $(( $1 - PPS ))x caption:"$2" "$3"
+  }
+  pcol $cw1 "$(printf '%s\n%s' "$place" "$date" | sed '/^$/d')" "$TMP/pc1.miff"
+  camera_body
+  pcol $cw2 "$(printf '%s\n%s' "$BODY" "$lens" | sed '/^$/d')" "$TMP/pc2.miff"
+  pcol $cw3 "$(printf '%s\n%s' "$EXP1" "$EXP2" | sed '/^$/d')" "$TMP/pc3.miff"
+  PCX=( $m $(( m + cw1 )) $(( m + cw1 + cw2 )) )
+  gap=$(pu 45); rule=$(( sw / 600 + 2 ))
+  ch=$(magick "$TMP/pc1.miff" "$TMP/pc2.miff" "$TMP/pc3.miff" -format "%h\n" info: | sort -n | tail -1)
+  PY_TITLE=$gap
+  PY_RULE=$(( gap + $(magick "$TMP/ptitle.miff" -format %h info:) + gap ))
+  PY_COLS=$(( PY_RULE + rule + gap / 2 ))
+  PRULE=$rule
+  # Sheet: margin m on the sides and top; below the photo the title, rule, grid and a bottom margin
+  B=$m; TOPB=$m; BOT=$(( PY_COLS + ch + m ))
+}
+
 # --- 2. Layout: everything sized from the photo's short side (after EXIF rotation)
 layout() {
   read -r W H < <(magick "$in" -auto-orient -format "%w %h\n" info:)
@@ -427,6 +509,11 @@ layout() {
     # Mat board: wide, and taller at the bottom so the photo doesn't look like it's sliding down
     B=$(u 140); TOPB=$B; BOT=$(u 260)
   fi
+  if (( POSTCARD )); then B=$(u 45); TOPB=$B; BOT=$B; fi
+  # Covers: yellow is drawn on the photo itself (no border); red is a red frame plus a thin white line
+  if [[ "$COVER" == yellow ]]; then B=0; TOPB=0; BOT=0; fi
+  if [[ "$COVER" == red ]]; then B=$(( $(u 55) + $(u 10) )); TOPB=$B; BOT=$B; fi
+  if (( POSTER )); then poster_layout; fi
   FW=$(( W + 2*B )); FH=$(( H + TOPB + BOT ))
 
   # Optical sizing: a square badge at a wordmark's height looks tiny, so logos narrower than ~5:1 grow
@@ -481,6 +568,9 @@ background() {
       canvas=( "$TMP/material.miff" ) ;;
     film)     canvas=( "xc:#111111" ) ;;
     museum)   canvas=( "xc:$MAT" ) ;;
+    poster)   canvas=( "xc:$PBG" ) ;;
+    card)     canvas=( "xc:#FBF9F3" ) ;;
+    cover)    canvas=( "xc:#E3120B" ) ;;
     gradient) canvas=( -define gradient:angle=135 "gradient:$BG" ) ;;   # diagonal, top-left -> bottom-right
     *)        canvas=( "xc:$BG" ) ;;
   esac
@@ -503,6 +593,7 @@ ink() {
   fi
   if (( FILM )); then FG="$AMBER"; FG2="rgba(242,177,52,0.6)"; fi
   if (( MUSEUM )); then FG="$INK"; FG2="$INK2"; fi
+  if (( POSTER )); then FG="$PINK"; FG2="$PINK"; fi
   return 0
 }
 
@@ -510,7 +601,8 @@ ink() {
 # embossed into a grey relief map and hard-light blended (so it shows on pure white as well as on dark
 # colours). Built at half size and scaled up: ~3x faster, and the grain is soft enough that it doesn't show.
 paper() {
-  if [[ "$KIND" == solid || "$KIND" == gradient || "$KIND" == museum ]] && (( PAPER > 0 )); then
+  if [[ "$KIND" == solid || "$KIND" == gradient || "$KIND" == museum || "$KIND" == poster ||
+        "$KIND" == card ]] && (( PAPER > 0 )); then
     local hw=$(( FW / 2 )) hh=$(( FH / 2 )) k=$PAPER
     if [[ "$BORDER" == museum-black ]]; then k=$(( PAPER / 3 )); fi   # black mat board is smooth; the relief shows strongly on black
     canvas+=( \( -size ${hw}x${hh} xc:gray50 -attenuate 1 +noise Gaussian -colorspace gray
@@ -590,17 +682,22 @@ add_text() {
 #   Digital photograph, Fujifilm Provia           medium: the film simulation, if any
 #   Fujifilm X-T20 ∙ XF18-55mm F2.8-4 R LM OIS    camera and lens
 #   35.8 mm ∙ ƒ/11.0 ∙ 1/340s ∙ ISO 200           exposure
+# Camera body with the brand in front unless the model already names it: "Fujifilm X-T20", "Sony ILCE-7M4",
+# but "Canon EOS R6", "LEICA Q3". Sets BRAND and BODY.
+camera_body() {
+  BRAND=""; [[ -n "$key" ]] && BRAND=$(brand_name "$key" | awk '{print $1}')
+  [[ "$key" == om ]] && BRAND="OM System"
+  BODY="$model"
+  if [[ -n "$BRAND" && -n "$model" ]] && ! grep -qi "^$(awk '{print $1}' <<<"$make")" <<<"$model" &&
+     ! grep -qi "^$key" <<<"$model"; then BODY="$BRAND $model"; fi
+  return 0
+}
 titlecase() { perl -CS -Mutf8 -pe 's/(\w+)/\u\L$1/g' <<<"$1"; }   # "PRO NEG. HI" -> "Pro Neg. Hi", "ACROS+R" -> "Acros+R"
 add_label() {
   local year brand body fm medium where p1 p2 lines=() lw
   year=$(exiftool -s3 -d %Y -DateTimeOriginal "$in")
   where="$place${place:+${year:+, }}$year"
-  brand=""; [[ -n "$key" ]] && brand=$(brand_name "$key" | awk '{print $1}')   # "Fujifilm", "Om" -> fixed below
-  [[ "$key" == om ]] && brand="OM System"
-  # Camera: the model, with the brand in front unless the model already names it ("Canon EOS R6", "LEICA Q3")
-  body="$model"
-  if [[ -n "$brand" && -n "$model" ]] && ! grep -qi "^$(awk '{print $1}' <<<"$make")" <<<"$model" &&
-     ! grep -qi "^$key" <<<"$model"; then body="$brand $model"; fi
+  camera_body; brand=$BRAND; body=$BODY
   fm=$(film_name "$in"); medium="Digital photograph${fm:+, $brand $(titlecase "$fm")}"
   p1=$(u 26); p2=$(u 20)
   lines+=( \( -font "$SERIF Bold.ttf" -pointsize $p1 -fill "$FG" label:"$title" \) )
@@ -614,6 +711,54 @@ add_label() {
   lw=$(magick "$TMP/label.miff" -format %w info:)
   # A left-aligned block whose right edge lines up with the photo's right edge
   args+=( "$TMP/label.miff" -gravity northwest -geometry +$(( B + W - lw ))+$(( TOPB + H + $(u 55) )) -composite )
+}
+
+# --- 7c. Poster text: frame number top right, the title, a rule and the grid under the photo
+add_poster() {
+  local y0=$(( TOPB + H )) i
+  args+=( -fill "$FG" -font HelveticaNeue-Medium -pointsize $PPS -gravity northeast
+          -annotate +$B+$(( B / 2 - PPS / 2 )) "No. $(frame_number)"
+          -gravity northwest "$TMP/ptitle.miff" -geometry +$B+$(( y0 + PY_TITLE )) -composite
+          -draw "rectangle $B,$(( y0 + PY_RULE )) $(( FW - B - 1 )),$(( y0 + PY_RULE + PRULE - 1 ))" )
+  for i in 1 2 3; do
+    args+=( "$TMP/pc$i.miff" -geometry +${PCX[$(( i - 1 ))]}+$(( y0 + PY_COLS )) -composite )
+  done
+}
+
+# --- 7d. Postcard: the location in big retro condensed capitals, centred at the top of the photo over a
+# soft shadow, like a classic travel postcard. The city, else the country, else no text. A long name
+# shrinks to fit the photo width.
+add_caption() {
+  local name pc k d top maxw w
+  name=$(exiftool -s3 -City "$in")
+  [[ -z "$name" ]] && name=$(exiftool -s3 -Country "$in")
+  [[ -n "$name" ]] || return 0
+  name=$(upper "$name")
+  pc=$(u 170); maxw=$(( W * 88 / 100 ))
+  w=$(magick -font Futura-CondExtraBold -kerning $(( pc / 20 )) -pointsize $pc label:"$name" -format %w info:)
+  if (( w > maxw )); then pc=$(( pc * maxw / w )); fi
+  k=$(( pc / 20 )); d=$(( pc / 25 + 1 )); top=$(( TOPB + pc / 3 ))
+  args+=( \( +size -background none -font Futura-CondExtraBold -kerning $k -pointsize $pc -fill "rgba(0,0,0,0.6)"
+             label:"$name" -bordercolor none -border $(( pc / 4 )) -blur 0x$(( pc / 9 )) \)
+          -gravity north -geometry +$d+$(( top - pc / 4 + d )) -composite
+          \( +size -background none -font Futura-CondExtraBold -kerning $k -pointsize $pc -fill "#FFFDF6" label:"$name" \)
+          -gravity north -geometry +0+$top -composite )
+}
+
+# --- 7e. Cover frames (no text). Yellow: a thick rectangle inset from the photo's edges, the photo
+# showing on both sides of it. Red: the red canvas is the frame; a thin white line runs around the photo.
+add_cover() {
+  local t i w
+  if [[ "$COVER" == yellow ]]; then
+    i=$(u 45); t=$(u 38)
+    args+=( -fill none -stroke "#FFCC00" -strokewidth $t
+            -draw "rectangle $(( i + t / 2 )),$(( i + t / 2 )) $(( W - i - t / 2 - 1 )),$(( H - i - t / 2 - 1 ))"
+            -stroke none )
+  else
+    w=$(u 10)
+    args+=( -fill white -draw "rectangle $(( B - w )),$(( TOPB - w )) $(( B + W + w - 1 )),$(( TOPB + H + w - 1 ))"
+            \( "$in" -auto-orient \) -gravity northwest -geometry +$B+$TOPB -composite )
+  fi
 }
 
 # --- 8. Logo, on top of the camera info.
@@ -658,8 +803,7 @@ add_edge_print() {
   esac
   iso=$(exiftool -s3 -ISO "$in")
   film=$(echo $maker $(film_name "$in") ${iso:+ISO $iso})   # (echo joins the non-empty parts)
-  num=$(basename "${in%.*}" | { grep -oE '[0-9]+' || true; } | tail -1)   # frame number: last number in the file name
-  if [[ -n "$num" ]]; then n=$(( 10#$num )); else n=$idx; fi
+  n=$(frame_number)
   pe=$PS; tri=$(( pe * 60 / 100 ))                          # same size as the other text; triangle size
   y=$(( B * 85 / 100 )); base=$(( FH - y - pe * 50 / 100 ))  # y = centre of the row, from the top
   args+=( -fill "$AMBER" -stroke none -font "$FONT_COND" -pointsize $pe -gravity southwest
@@ -694,7 +838,11 @@ write_out() {
 
 frame_photo() {
   read_meta; layout; background; ink; paper; place_photo
-  if (( MUSEUM )); then add_label; else add_text; fi
+  if (( MUSEUM )); then add_label
+  elif (( POSTER )); then add_poster
+  elif (( POSTCARD )); then add_caption
+  elif [[ -n "$COVER" ]]; then add_cover
+  else add_text; fi
   add_logo; add_edge_print; write_out
 }
 
