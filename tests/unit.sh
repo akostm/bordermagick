@@ -76,7 +76,7 @@ check "unset variable kept" '$border' "$(LY_VAR_border=""; layout_load base; lay
 
 LAYOUT_PATH="$FIX/user:$FIX/builtin"
 check "user layout wins" "$FIX/user/base.layout" "$(layout_find base)"
-check "list" "base mine child grand" "$(layout_list)"
+check "list" "base child grand mine" "$(layout_list)"
 check "user layout extends built-in" "title exposure where line|Mine" "$(layout_load mine; echo "$LY_ITEMS|$(layout_get layout category)")"
 
 LAYOUT_PATH="$FIX/errors:$FIX/builtin"

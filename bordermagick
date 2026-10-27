@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# bordermagick — border + wider bottom strip: photo title on the left, maker logo and camera info on the right
+# bordermagick — frame photos with a border, title, camera info and maker logo. Each border style is a
+# layout file (layouts/, or your own in ~/.bordermagick/layouts) drawn by the engine in lib/.
 # Run "bordermagick -h" for options.
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"   # needed when run from Automator/Shortcuts
@@ -7,12 +8,9 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"   # needed when run from Au
 # Data folder (override with BORDERMAGICK_HOME); logos are cached / user-supplied in logos/<maker>.png
 BM_HOME="${BORDERMAGICK_HOME:-$HOME/.bordermagick}"
 LOGO_DIR="$BM_HOME/logos"
-# DIN Alternate ships in Bold only, and lacks "·" (U+00B7) — use "∙" (U+2219) instead
-FONT="/System/Library/Fonts/Supplemental/DIN Alternate Bold.ttf"
 FONT_COND="/System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf"   # film edge print
 AMBER="#F2B134"                                                        # contact-sheet ink
-SERIF="/System/Library/Fonts/Supplemental/Georgia"                     # museum label: + .ttf / Bold / Italic
-SEP="∙"
+SEP="∙"   # separator in joined values: DIN Alternate lacks "·" (U+00B7), so "∙" (U+2219)
 
 # The script's own folder (through symlinks, e.g. a link in /usr/local/bin), for lib/ and layouts/
 src=$0
@@ -128,13 +126,14 @@ pastel() {  # name -> hex for the Instax-style presets; anything else passes thr
 }
 
 ME=$(basename "$0")
-VERSION="1.2.2"
+VERSION="1.3.0"
 help() {
   cat <<HELP
 $ME — frame photos with a border, title, camera info and maker logo
 
 Usage: $ME [-b border] [-p strength] [-s size] [-m metadata] photo.jpg …
        $ME -L
+       $ME --layouts | --dump-layout <layout> | --tags photo.jpg | --plan [-b border] photo.jpg …
        $ME -h | -V
 
 Writes <photo>_<border>_<size>.jpg next to each photo (IMG_0042_marble_4k.jpg;
@@ -147,27 +146,9 @@ Title tag, else its City, else the file name; the line below shows city and date
                  Auto:       auto       a light pastel picked from the photo
                  Gradient:   sunset, ocean, aurora, peach, dusk,
                              or two colours: '#FFD6E0-#B5E2FA'
-                 Glass:      frost, frost-dark   the photo blurred behind frosted glass
-                 Stone:      marble, marble-dark, marble-green, marble-beige, terrazzo
-                             (photo and lettering inset into the stone)
-                 Fabric:     linen
-                 Print:      poster, poster-colour   Swiss-style poster: photo, huge title in
-                             Helvetica Neue, and a grid of place/date, camera, exposure; on
-                             off-white paper, or on the photo's main colour
-                             cover-yellow   magazine-cover look: a yellow rectangle inset on
-                             the full-bleed photo (same size as the original, no text)
-                             cover-red      magazine-cover look: red border with a thin white
-                             inner line around the photo (no text)
-                             postcard   white-bordered travel postcard: the city (else the
-                             country) in big retro capitals across the top (Futura Condensed)
-                 Gallery:    museum, museum-white, museum-black   wide mat (warm off-white,
-                             white or black) with a bevelled opening and a museum wall label:
-                             title, place and year, medium (film simulation), camera, exposure
-                 Film:       contact    black contact-sheet frame printed in amber, with film-edge
-                             markings along the top instead of a logo: maker, film simulation
-                             and ISO (FUJIFILM PROVIA ISO 200, SONY ISO 200), and frame
-                             numbers from the file name (…_33.jpg -> 33, 33A, 34)
-  -p strength  Paper texture on solid and gradient borders: 0 (off) to 30, default 6
+$(help_layouts)
+  -p strength  Paper texture (solid and gradient borders, museum, poster, postcard): 0 (off) to 30,
+               default 6
   -s size      Output size (default: grow)
                  grow        full-resolution photo; the frame adds to the outer size
                  fit         keep the original's long edge; the short edge follows
@@ -180,6 +161,15 @@ Title tag, else its City, else the file name; the line below shows city and date
   -L           Download all known manufacturer logos now (only missing ones), then exit
   -h           Show this help
   -V           Show the version
+
+Layouts (preview: the format may still change in 1.x):
+  Every border style above is a layout file. Your own go in $BM_HOME/layouts/<name>.layout and are
+  used with -b <name>; one named like a built-in style replaces it (and can extend it). See
+  docs/layouts.md in the bordermagick folder.
+  --layouts            list all layouts and where they come from
+  --dump-layout <name> show a layout with everything it inherits
+  --tags photo.jpg     show the values a layout can print for that photo
+  --plan …             print where everything goes instead of writing the photos
 
 Examples:
   $ME holiday/*.jpg
@@ -214,6 +204,29 @@ $(for k in $LOGO_KEYS; do brand_name $k; done | paste -sd, - | sed 's/,/, /g' |
   Missing    no logo file and no download -> the camera info is shown without a logo.
 HELP
 }
+# The -b list in the help: each layout's description under its category (standard is the colours above)
+HELP_ORDER="Glass Stone Fabric Gallery Print Film"
+help_layouts() {
+  local l c rows="" cats="" first d
+  for l in $(layout_list); do
+    [[ "$l" == standard ]] && continue
+    ( layout_load "$l" ) 2>/dev/null || continue   # a broken layout of your own shouldn't break -h
+    layout_load "$l"
+    c=$(layout_get layout category); d=$(layout_get layout description)
+    rows+="${c:-Other}|$l|$d"$'\n'
+    [[ " $HELP_ORDER $cats " == *" ${c:-Other} "* ]] || cats="$cats ${c:-Other}"
+  done
+  for c in $HELP_ORDER $cats; do
+    first=1
+    while IFS='|' read -r rc l d; do
+      [[ "$rc" == "$c" ]] || continue
+      if (( first )); then printf '                 %-11s ' "$c:"; first=0; else printf '%29s' ''; fi
+      printf '%-14s ' "$l"
+      fold -s -w 58 <<<"$d" | sed 's/ *$//; 2,$s/^/                                            /'
+    done <<<"$rows"
+  done
+}
+
 LOGO_KEYS="apple ipad iphone canon fujifilm google hasselblad kodak leica nikon olympus om panasonic
            pentax polaroid ricoh samsung sony xiaomi"
 
@@ -289,6 +302,15 @@ if [[ "${1:-}" == --tags ]]; then
   done
   exit 0
 fi
+if [[ "${1:-}" == --layouts ]]; then
+  echo "Layouts (-b <name>). Yours: $BM_HOME/layouts/ (they replace built-in ones of the same name)."
+  for l in $(layout_list); do
+    f=$(layout_find "$l"); layout_load "$l"
+    where="built-in"; [[ "$f" == "$BM_DIR/layouts/"* ]] || where="yours: $f"
+    printf '  %-14s %-9s %s  (%s)\n' "$l" "$(layout_get layout category)" "$(layout_get layout description)" "$where"
+  done
+  exit 0
+fi
 if [[ "${1:-}" == --dump-layout ]]; then
   [[ -n "${2:-}" ]] || die "--dump-layout needs a layout name" "$(ly_available)"
   layout_load "$2"; layout_dump
@@ -345,94 +367,37 @@ esac
 [[ "$PAPER" =~ ^[0-9]+$ ]] && (( PAPER <= 30 )) ||
   die "invalid paper strength '$PAPER'" "Use a whole number from 0 (off) to 30."
 
-# Border: a layout file, a named style, or one colour / two joined by "-" (with the standard layout if
-# there is one)
-LAYOUT=""
-if layout_find "$BORDER" >/dev/null; then LAYOUT=$BORDER; fi
-[[ -n "$LAYOUT" ]] || case "$BORDER" in
-  auto|frost|frost-dark|marble|marble-dark|marble-green|marble-beige|terrazzo|linen|contact|museum|museum-white|museum-black|poster|poster-colour|postcard|cover-yellow|cover-red) ;;
-  *)
+# Border: a layout, else one colour (or a preset, or two joined by "-" for a gradient, or auto) drawn with
+# the standard layout
+if layout_find "$BORDER" >/dev/null; then
+  LAYOUT=$BORDER; LY_VAR_border=white
+else
+  if [[ "$BORDER" != auto ]]; then
     IFS=- read -r -a parts <<<"$(pastel "$BORDER")"
     (( ${#parts[@]} <= 2 )) ||
       die "invalid border '$BORDER'" "A gradient takes exactly two colours, e.g. '#FFD6E0-#B5E2FA'."
     for c in "${parts[@]}"; do
       # (an unknown colour name is only a warning to ImageMagick, so any output counts as failure)
       [[ -n "$c" && -z "$(magick xc:"$c" null: 2>&1)" ]] ||
-        die "unknown border '$BORDER'" "'$c' is neither a style nor a colour ImageMagick knows. See the list under -b."
+        die "unknown border '$BORDER'" "'$c' is neither a layout nor a colour ImageMagick knows. See -h or --layouts."
     done
-    if layout_find standard >/dev/null; then LAYOUT=standard; fi ;;
-esac
-if [[ "$BORDER" == auto ]] && layout_find standard >/dev/null; then LAYOUT=standard; fi
-if [[ -n "$LAYOUT" ]]; then
-  LY_VAR_paper=$PAPER
-  if [[ "$LAYOUT" == "$BORDER" ]]; then LY_VAR_border=white; else LY_VAR_border=$(pastel "$BORDER"); fi
-  layout_load "$LAYOUT"
-elif (( PLAN )); then
-  die "--plan works with layout files" "$(ly_available)"
+  fi
+  layout_find standard >/dev/null ||
+    die "no standard layout in $BM_DIR/layouts" "Keep the layouts folder next to the script."
+  LAYOUT=standard; LY_VAR_border=$(pastel "$BORDER")
 fi
+LY_VAR_paper=$PAPER
+layout_load "$LAYOUT"
 
 # =====================================================================================================
-# Framing pipeline. One photo goes through these stages in order (frame_photo); each stage reads and
-# sets plain global variables. A border style is a set of switches (style_setup), so a new style is
-# one case there plus the stage that draws it.
+# Drawing helpers for the layout engine (lib/engine.sh): metadata and logo, backgrounds, photo effects,
+# the edge print, and writing the result. Each per-photo value lives in a plain global variable.
 # =====================================================================================================
 
-u() { echo $(( S * $1 / 1000 )); }   # tenths of a percent of the photo's short side
-
-# --- Style switches, from -b (the same for every photo in a run)
-#   KIND     background: solid | gradient | frost | material | film
-#   INSET    photo and lettering cut into the surface (stone)
-#   LOGO_ON  maker logo above the camera info
-#   FILM     contact-sheet layout: edge print, one condensed uppercase size, no logo
-#   MUSEUM   mat-board layout: wide bottom-weighted mat, bevelled opening, wall label instead of the strip
-#   POSTER   poster layout: photo, huge title, rule and a three-column grid below
-#   POSTCARD postcard front: even white border, caption written on the photo
-#   COVER    magazine-cover frame without text: yellow (inset rectangle) or red (border)
-style_setup() {
-  KIND=solid; INSET=0; LOGO_ON=1; FILM=0; MUSEUM=0; POSTER=0; POSTCARD=0; COVER=""
-  case "$BORDER" in
-    frost|frost-dark) KIND=frost ;;
-    marble|marble-dark|marble-green|marble-beige|terrazzo) KIND=material; INSET=1 ;;
-    linen) KIND=material ;;
-    contact) KIND=film; LOGO_ON=0; FILM=1 ;;
-    museum|museum-white|museum-black) KIND=museum; LOGO_ON=0; MUSEUM=1
-      # mat, bevel core, label ink (title), label ink (details)
-      case "$BORDER" in
-        museum)       MAT="#F3F0E8"; CORE="#FBFAF6"; INK="#2A2826"; INK2="#6E6A64" ;;
-        museum-white) MAT="#FAFAF8"; CORE="#FFFFFF"; INK="#2A2826"; INK2="#6E6A64" ;;
-        museum-black) MAT="#161616"; CORE="#ECEAE4"; INK="#E8E6E1"; INK2="#A39F98" ;;
-      esac ;;
-    poster|poster-colour) KIND=poster; LOGO_ON=0; POSTER=1 ;;
-    postcard) KIND=card; LOGO_ON=0; POSTCARD=1 ;;
-    cover-yellow) KIND=cover; LOGO_ON=0; COVER=yellow ;;
-    cover-red)    KIND=cover; LOGO_ON=0; COVER=red ;;
-    auto) ;;
-    *) if [[ "$(pastel "$BORDER")" == *-* ]]; then KIND=gradient; fi ;;   # "colour1-colour2"
-  esac
-  # Paper texture (strength PAPER_K) on the plain surfaces
-  PAPER_ON=0; PAPER_K=$PAPER
-  case "$KIND" in solid|gradient|museum|poster|card) (( PAPER > 0 )) && PAPER_ON=1 ;; esac
-  if [[ "$BORDER" == museum-black ]]; then PAPER_K=$(( PAPER / 3 )); fi   # black mat board is smooth; the relief shows strongly on black
-}
-
-# --- 1. Metadata: text lines and maker logo
+# Tags for the photo, and its maker logo when the layout shows one (downloaded on first use)
 read_meta() {
   read_tags "$in" "$idx"
-  make=$T_make; model=$T_model; lens=$T_lens; key=$T_key; city=$T_city; date=$T_date
-  # Settings line from whatever the photo has ("35.8 mm ∙ ƒ/11.0 ∙ 1/340s ∙ ISO 200"); missing values are
-  # left out. The contact sheet prints the ISO in the film edge instead.
-  if (( FILM )); then info=$(join_sep "$T_focal" "$T_aperture" "$T_shutter"); else info=$T_exposure; fi
-  # Kept separately for layouts that split the settings over two lines (poster)
-  EXP1=$(join_sep "$T_focal" "$T_aperture"); EXP2=$(join_sep "$T_shutter" "$T_iso")
-  camera="$model${lens:+ $SEP $lens}"
-
-  # Title: Title tag, else City, else the file name. The line below shows city and date,
-  # minus the city when it's already the title.
-  title=${T_title:-${T_city:-$T_filename}}
-  place=$T_place
-  sub="$place${place:+${date:+ $SEP }}$date"
-
-  logo=""
+  key=$T_key; logo=""
   if (( LOGO_ON )); then
     logo="$LOGO_DIR/$key.png"
     if [[ -n "$key" ]]; then fetch_logo "$key"; fi
@@ -447,81 +412,8 @@ dominant_colour() {
   magick xc:"$c" -modulate 80,130 -format "#%[hex:u.p{0,0}]" info:
 }
 
-# Poster: everything is measured from the sheet width (photo width + margins), and the text is rendered
-# first because its height sets the sheet height. Paper and ink: off-white with black, or the photo's most
-# common colour (deepened so type stays bold on it) with black or white, whichever reads better.
-poster_layout() {
-  local m=$(( W * 6 / 100 )) sw pt cw1 cw2 cw3 gap rule ch
-  sw=$(( W + 2 * m ))
-  pu() { echo $(( sw * $1 / 1000 )); }
-  if [[ "$BORDER" == poster ]]; then
-    PBG="#F6F5F1"; PINK="#111111"
-  else
-    PBG=$(dominant_colour)
-    if (( $(magick xc:"$PBG" -format "%[fx:luminance<0.45]" info:) )); then PINK="#FFFFFF"; else PINK="#111111"; fi
-  fi
-  # Title: huge, left aligned, wrapping to the sheet width, tight leading. (The tight leading also shortens
-  # the last line and would clip descenders and underscores, so a blank line is added and trimmed away.)
-  pt=$(pu 110)
-  magick -background none -fill "$PINK" -font HelveticaNeue-Bold -pointsize $pt -kerning $(( -pt / 40 )) \
-    -interline-spacing $(( -pt * 18 / 100 )) -size $(( sw - 2 * m ))x caption:"$(im_text "$title")"$'\n'" " -trim +repage "$TMP/ptitle.miff"
-  # Grid: place and date | camera and lens (widest) | exposure; long lines wrap within their column
-  PPS=$(pu 22); cw1=$(( (sw - 2 * m) * 28 / 100 )); cw2=$(( (sw - 2 * m) * 44 / 100 )); cw3=$(( sw - 2 * m - cw1 - cw2 ))
-  pcol() {  # width text out (an empty column becomes a blank 1-pixel image)
-    if [[ -z "$2" ]]; then magick -size 1x1 xc:none "$3"; return; fi
-    magick -background none -fill "$PINK" -font HelveticaNeue-Medium -pointsize $PPS \
-      -interline-spacing $(( PPS / 4 )) -size $(( $1 - PPS ))x caption:"$(im_text "$2")" "$3"
-  }
-  pcol $cw1 "$(printf '%s\n%s' "$place" "$date" | sed '/^$/d')" "$TMP/pc1.miff"
-  pcol $cw2 "$(printf '%s\n%s' "$T_body" "$lens" | sed '/^$/d')" "$TMP/pc2.miff"
-  pcol $cw3 "$(printf '%s\n%s' "$EXP1" "$EXP2" | sed '/^$/d')" "$TMP/pc3.miff"
-  PCX=( $m $(( m + cw1 )) $(( m + cw1 + cw2 )) )
-  gap=$(pu 45); rule=$(( sw / 600 + 2 ))
-  ch=$(magick "$TMP/pc1.miff" "$TMP/pc2.miff" "$TMP/pc3.miff" -format "%h\n" info: | sort -n | tail -1)
-  PY_TITLE=$gap
-  PY_RULE=$(( gap + $(magick "$TMP/ptitle.miff" -format %h info:) + gap ))
-  PY_COLS=$(( PY_RULE + rule + gap / 2 ))
-  PRULE=$rule
-  # Sheet: margin m on the sides and top; below the photo the title, rule, grid and a bottom margin
-  B=$m; TOPB=$m; BOT=$(( PY_COLS + ch + m ))
-}
-
-# --- 2. Layout: everything sized from the photo's short side (after EXIF rotation)
-layout() {
-  read -r W H < <(magick "$in" -auto-orient -format "%w %h\n" info:)
-  S=$(( W < H ? W : H ))
-  B=$(u 30)                     # side border; also the top border, except on the contact sheet
-  BOT=$(u 130)                  # bottom strip height
-  PT=$(u 40)                    # title font size
-  PS=$(u 17)                    # all other text
-  LOGO_H=$(u 18)                # visible height of a wide wordmark (padding trimmed); squarer logos get more
-  # Baselines, measured up from the bottom edge. The title's top lines up with the logo's top,
-  # the place/date line shares a baseline with the settings line.
-  Y_TITLE=$(u 66); Y_CAM=$(u 62); Y_LOGO=$(u 88); Y_LOW=$(u 36)
-  TOPB=$B
-  if (( FILM )); then
-    # Contact sheet: a taller top border for the edge print, and one text size throughout so both sides
-    # mirror each other (bright line over dim line), with equal margins above and below the two lines
-    TOPB=$(( 2 * B ))
-    PS=$(u 22); PT=$PS; BOT=$(u 110); Y_TITLE=$(u 64); Y_CAM=$(u 64); Y_LOW=$(u 30)
-  fi
-  if (( MUSEUM )); then
-    # Mat board: wide, and taller at the bottom so the photo doesn't look like it's sliding down
-    B=$(u 140); TOPB=$B; BOT=$(u 260)
-  fi
-  if (( POSTCARD )); then B=$(u 45); TOPB=$B; BOT=$B; fi
-  # Covers: yellow is drawn on the photo itself (no border); red is a red frame plus a thin white line
-  if [[ "$COVER" == yellow ]]; then B=0; TOPB=0; BOT=0; fi
-  if [[ "$COVER" == red ]]; then B=$(( $(u 55) + $(u 10) )); TOPB=$B; BOT=$B; fi
-  if (( POSTER )); then poster_layout; fi
-  FW=$(( W + 2*B )); FH=$(( H + TOPB + BOT ))
-
-  # Optical sizing: a square badge at a wordmark's height looks tiny, so logos narrower than ~5:1 grow
-  # with the square root of how much squarer they are, up to 1.6x (what fits above the camera line)
-  LH=$(logo_height "$LOGO_H")
-  return 0
-}
-
+# Optical sizing: a square badge at a wordmark's height looks tiny, so logos narrower than ~5:1 grow with
+# the square root of how much squarer they are, up to 1.6x (what fits above the camera line)
 logo_height() {  # height of a wide wordmark -> height for this logo
   if [[ -f "$logo" ]]; then
     magick "$logo" -trim -format "%[fx:w/h]" info: |
@@ -536,72 +428,10 @@ logo_height() {  # height of a wide wordmark -> height for this logo
 # and escape a leading @, so the text prints as it is.
 im_text() { local t=${1//\\/\\\\}; t=${t//%/%%}; [[ "$t" == @* ]] && t="\\$t"; printf '%s' "$t"; }
 
-# Text width at a given size (terrazzo's keep-clear boxes), and the largest of several numbers
-text_w() { magick -font "$FONT" -pointsize "$1" label:"$(im_text "$2")" -format "%w" info:; }
-max() { printf "%s\n" "$@" | sort -n | tail -1; }
-
 # The photo's average colour, lifted to a light pastel
 auto_colour() {
   magick "$in" -resize 1x1\! -colorspace HSL -channel G -evaluate multiply 1.4 \
     -channel B -evaluate set 82% +channel -colorspace sRGB -format "#%[hex:u.p{0,0}]" info:
-}
-
-# --- 3. Background: the full-size canvas the photo is placed on (lets gradients span the whole frame)
-background() {
-  # Border colour; "auto" = the photo's average colour, lifted to a light pastel
-  if [[ "$BORDER" == auto ]]; then
-    BG=$(auto_colour)
-  else
-    BG=$(pastel "$BORDER")
-  fi
-  shadow=()
-  case "$KIND" in
-    frost)
-      # Frosted glass: the photo stretched to fill the frame, blurred (cheaply, at 1/16 size), washed with a
-      # tint so text stays readable, plus fine grain for the frosted texture
-      local tint sw sh
-      if [[ "$BG" == frost ]]; then tint=( -fill white -colorize 55% ); else tint=( -fill black -colorize 50% ); fi
-      sw=$(( FW / 16 )); sh=$(( FH / 16 ))
-      canvas=( \( "$in" -auto-orient -resize ${sw}x${sh}^ -gravity center -extent ${sw}x${sh} -blur 0x4
-                   -resize ${FW}x${FH}\! "${tint[@]}" -attenuate 0.2 +noise Gaussian \) )
-      photo_shadow_args $B $B $B; shadow=( "${SHADOW_ARGS[@]}" ) ;;
-    material)
-      if [[ "$BG" == terrazzo ]]; then
-        # Keep chips off the text: measure both text blocks (plus the logo) and pass them as keep-clear boxes
-        local lw rw logo_w=0 pad top bot
-        lw=$(max "$(text_w $PT "$title")" "$( [[ -n "$sub" ]] && text_w $PS "$sub" || echo 0 )")
-        if [[ -f "$logo" ]]; then logo_w=$(magick "$logo" -trim -format "%[fx:round(w*$LH/h)]" info:); fi
-        rw=$(max "$(text_w $PS "$camera")" "$(text_w $PS "$info")" "$logo_w")
-        pad=$(( PS / 2 )); top=$(( FH - Y_LOGO - LH - pad )); bot=$(( FH - Y_LOW + PS / 2 ))
-        CLEAR="$(( B - pad )),$top,$(( B + lw + pad )),$bot $(( FW - B - rw - pad )),$top,$(( FW - B + pad )),$bot"
-      fi
-      material "$BG" $FW $FH "$TMP/material.miff"
-      canvas=( "$TMP/material.miff" ) ;;
-    film)     canvas=( "xc:#111111" ) ;;
-    museum)   canvas=( "xc:$MAT" ) ;;
-    poster)   canvas=( "xc:$PBG" ) ;;
-    card)     canvas=( "xc:#FBF9F3" ) ;;
-    cover)    canvas=( "xc:#E3120B" ) ;;
-    gradient) canvas=( -define gradient:angle=135 "gradient:$BG" ) ;;   # diagonal, top-left -> bottom-right
-    *)        canvas=( "xc:$BG" ) ;;
-  esac
-  return 0
-}
-
-# --- 4. Ink: text and logo colours follow the border's average brightness; secondary text is
-# translucent so it picks up the tint. The contact sheet prints everything in amber.
-ink() {
-  local lum
-  case "$KIND" in
-    frost)    if [[ "$BG" == frost ]]; then lum=0.9; else lum=0.1; fi ;;   # the tint dominates; skip rendering the canvas
-    material) lum=$(magick "$TMP/material.miff" -resize 1x1\! -format "%[fx:luminance]" info:) ;;
-    *)        lum=$(magick -size 64x64 "${canvas[@]}" -resize 1x1\! -format "%[fx:luminance]" info:) ;;
-  esac
-  canvas_ink "$lum"
-  if (( FILM )); then FG="$AMBER"; FG2="rgba(242,177,52,0.6)"; fi
-  if (( MUSEUM )); then FG="$INK"; FG2="$INK2"; fi
-  if (( POSTER )); then FG="$PINK"; FG2="$PINK"; fi
-  return 0
 }
 
 # Ink for a background of this luminance (0–1): dark or light text (FG), and a translucent secondary (FG2)
@@ -614,7 +444,7 @@ canvas_ink() {
   fi
 }
 
-# --- 5. Paper texture for solid/gradient borders: directional fibres + faint large-scale mottling,
+# Paper texture: directional fibres + faint large-scale mottling,
 # embossed into a grey relief map and hard-light blended (so it shows on pure white as well as on dark
 # colours). Built at half size and scaled up: ~3x faster, and the grain is soft enough that it doesn't show.
 paper() {
@@ -627,17 +457,6 @@ paper() {
                   -shade 120x55 -auto-level +level $(( 50 - k ))%,$(( 50 + k ))% -resize ${FW}x${FH}\! \)
               -compose hardlight -composite -compose over )
   fi
-  return 0
-}
-
-# --- 6. Photo on the canvas; on stone it's recessed: an inner shadow over its top and left edges (built
-# at 1/8 size and scaled up), a shadow line on the stone's cut edge above/left, and a highlight where
-# light catches it below/right
-place_photo() {
-  args=( -size ${FW}x${FH} "${canvas[@]}" ${shadow[@]+"${shadow[@]}"} )
-  if (( MUSEUM )); then photo_bevel_args $B $TOPB $(( S / 250 + 2 )) "$CORE"; args+=( "${BEVEL_ARGS[@]}" ); fi
-  args+=( \( "$in" -auto-orient \) -gravity northwest -geometry +$B+$TOPB -composite )
-  if (( INSET )); then photo_inset_args $B $B $B; args+=( "${INSET_ARGS[@]}" ); fi
   return 0
 }
 
@@ -678,133 +497,18 @@ photo_inset_args() {  # x y border
                -draw "rectangle $(( x + W )),$y $(( x + W + lw - 1 )),$(( y + H + lw - 1 ))" )
 }
 
-# --- 7. Text: title and place/date on the left, camera and settings on the right.
-# Engraved on stone: a shadow copy nudged up-left and a highlight copy nudged down-right go first.
-text_layer() {  # dx dy (screen px, right/down) primary-fill secondary-fill
-  local dx=$1 dy=$2
-  args+=( -gravity southwest -pointsize "$PT" -fill "$3" -annotate +$(( B + dx ))+$(( Y_TITLE - dy )) "$(im_text "$title")"
-                             -pointsize "$PS" -fill "$4" -annotate +$(( B + dx ))+$(( Y_LOW - dy ))   "$(im_text "$sub")"
-          -gravity southeast -pointsize "$PS" -fill "$3" -annotate +$(( B - dx ))+$(( Y_CAM - dy ))   "$(im_text "$camera")"
-                             -pointsize "$PS" -fill "$4" -annotate +$(( B - dx ))+$(( Y_LOW - dy ))   "$(im_text "$info")" )
-}
 upper() { perl -CS -Mutf8 -pe '$_ = uc; s/Ƒ/ƒ/g' <<<"$1"; }   # (ƒ stays lowercase: DIN Condensed has no Ƒ)
 
-add_text() {
-  local tfont="$FONT"
-  o=$(( PS / 22 + 1 ))          # engraving offset (also used for the logo)
-  if (( FILM )); then
-    # Film-edge look: everything in uppercase DIN Condensed, like the edge print
-    tfont="$FONT_COND"
-    title=$(upper "$title"); sub=$(upper "$sub"); camera=$(upper "$camera"); info=$(upper "$info")
-  fi
-  args+=( -font "$tfont" )
-  if (( INSET )); then
-    text_layer -$o -$o "rgba(0,0,0,0.45)" "rgba(0,0,0,0.3)"
-    text_layer  $o  $o "rgba(255,255,255,0.55)" "rgba(255,255,255,0.35)"
-  fi
-  text_layer 0 0 "$FG" "$FG2"
-  return 0
-}
-
-# --- 7b. Museum wall label below the photo's right edge, in Georgia like a gallery label:
-#   Erechtheion                                   title
-#   Athens, 2023                                  place and year (italic)
-#   Digital photograph, Fujifilm Provia           medium: the film simulation, if any
-#   Fujifilm X-T20 ∙ XF18-55mm F2.8-4 R LM OIS    camera and lens
-#   35.8 mm ∙ ƒ/11.0 ∙ 1/340s ∙ ISO 200           exposure
-add_label() {
-  local year brand=$T_brand body=$T_body medium where p1 p2 lines=() lw
-  year=$(tag_date %Y)
-  where="$place${place:+${year:+, }}$year"
-  medium="Digital photograph${T_film:+, $brand $T_film}"
-  p1=$(u 26); p2=$(u 20)
-  lines+=( \( -font "$SERIF Bold.ttf" -pointsize $p1 -fill "$FG" label:"$(im_text "$title")" \) )
-  [[ -n "$where" ]] && lines+=( \( -size 1x$(( p2 / 3 )) xc:none +size \)
-                                \( -font "$SERIF Italic.ttf" -pointsize $p2 -fill "$FG" label:"$(im_text "$where")" \) )
-  lines+=( \( -size 1x$(( p2 * 3 / 4 )) xc:none +size \)
-           \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$(im_text "$medium")" \) )
-  [[ -n "$body$lens" ]] && lines+=( \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$(im_text "$body${body:+${lens:+ $SEP }}$lens")" \) )
-  [[ -n "$info" ]] && lines+=( \( -font "$SERIF.ttf" -pointsize $p2 -fill "$FG2" label:"$(im_text "$info")" \) )
-  magick -background none "${lines[@]}" -gravity west -append "$TMP/label.miff"
-  lw=$(magick "$TMP/label.miff" -format %w info:)
-  # A left-aligned block whose right edge lines up with the photo's right edge
-  args+=( "$TMP/label.miff" -gravity northwest -geometry +$(( B + W - lw ))+$(( TOPB + H + $(u 55) )) -composite )
-}
-
-# --- 7c. Poster text: frame number top right, the title, a rule and the grid under the photo
-add_poster() {
-  local y0=$(( TOPB + H )) i
-  args+=( -fill "$FG" -font HelveticaNeue-Medium -pointsize $PPS -gravity northeast
-          -annotate +$B+$(( B / 2 - PPS / 2 )) "$(im_text "No. $T_frame")"
-          -gravity northwest "$TMP/ptitle.miff" -geometry +$B+$(( y0 + PY_TITLE )) -composite
-          -draw "rectangle $B,$(( y0 + PY_RULE )) $(( FW - B - 1 )),$(( y0 + PY_RULE + PRULE - 1 ))" )
-  for i in 1 2 3; do
-    args+=( "$TMP/pc$i.miff" -geometry +${PCX[$(( i - 1 ))]}+$(( y0 + PY_COLS )) -composite )
-  done
-}
-
-# --- 7d. Postcard: the location in big retro condensed capitals, centred at the top of the photo over a
-# soft shadow, like a classic travel postcard. The city, else the country, else no text. A long name
-# shrinks to fit the photo width.
-add_caption() {
-  local name lbl pc k d top maxw w
-  name=${T_city:-$T_country}
-  [[ -n "$name" ]] || return 0
-  name=$(upper "$name"); lbl=$(im_text "$name")
-  pc=$(u 170); maxw=$(( W * 88 / 100 ))
-  w=$(magick -font Futura-CondExtraBold -kerning $(( pc / 20 )) -pointsize $pc label:"$lbl" -format %w info:)
-  if (( w > maxw )); then pc=$(( pc * maxw / w )); fi
-  k=$(( pc / 20 )); d=$(( pc / 25 + 1 )); top=$(( TOPB + pc / 3 ))
-  args+=( \( +size -background none -font Futura-CondExtraBold -kerning $k -pointsize $pc -fill "rgba(0,0,0,0.6)"
-             label:"$lbl" -bordercolor none -border $(( pc / 4 )) -blur 0x$(( pc / 9 )) \)
-          -gravity north -geometry +$d+$(( top - pc / 4 + d )) -composite
-          \( +size -background none -font Futura-CondExtraBold -kerning $k -pointsize $pc -fill "#FFFDF6" label:"$lbl" \)
-          -gravity north -geometry +0+$top -composite )
-}
-
-# --- 7e. Cover frames (no text). Yellow: a thick rectangle inset from the photo's edges, the photo
-# showing on both sides of it. Red: the red canvas is the frame; a thin white line runs around the photo.
-add_cover() {
-  local t i w
-  if [[ "$COVER" == yellow ]]; then
-    i=$(u 45); t=$(u 38)
-    args+=( -fill none -stroke "#FFCC00" -strokewidth $t
-            -draw "rectangle $(( i + t / 2 )),$(( i + t / 2 )) $(( W - i - t / 2 - 1 )),$(( H - i - t / 2 - 1 ))"
-            -stroke none )
-  else
-    w=$(u 10)
-    args+=( -fill white -draw "rectangle $(( B - w )),$(( TOPB - w )) $(( B + W + w - 1 )),$(( TOPB + H + w - 1 ))"
-            \( "$in" -auto-orient \) -gravity northwest -geometry +$B+$TOPB -composite )
-  fi
-}
-
-# --- 8. Logo, on top of the camera info.
-# On dark borders the logo's black parts turn white but coloured accents stay (Fuji's red I): each pixel
-# is treated as a mix of accent colour and black (estimated from its chroma) and only the black share is
-# lifted to white, so antialiased edges blend smoothly instead of leaving dark specks. Logos that bring
-# their own background (Nikon's yellow band) are left as they are.
-add_logo() {
-  [[ -f "$logo" ]] || return 0
-  prepare_logo "$LH" "$TMP/logo.miff"
-  if (( INSET )); then   # engraved like the text: tinted silhouettes nudged up-left and down-right
-    args+=( \( "$TMP/logo.miff" -fill black -colorize 100 -channel A -evaluate multiply 0.45 +channel \)
-            -gravity southeast -geometry +$(( B + o ))+$(( Y_LOGO + o )) -composite
-            \( "$TMP/logo.miff" -fill white -colorize 100 -channel A -evaluate multiply 0.55 +channel \)
-            -gravity southeast -geometry +$(( B - o ))+$(( Y_LOGO - o )) -composite )
-  fi
-  args+=( "$TMP/logo.miff" -gravity southeast -geometry +$B+$Y_LOGO -composite )
-}
-
+# The logo, trimmed and scaled. On dark borders its black parts turn white but coloured accents stay (Fuji's
+# red I): each pixel is treated as a mix of accent colour and black (estimated from its chroma) and only the
+# black share is lifted to white, so antialiased edges blend smoothly instead of leaving dark specks. Logos
+# that bring their own background (Nikon's yellow band) are left as they are.
 prepare_logo() {  # height out: the logo trimmed, recoloured for the background and scaled
   local recolour=()
   if (( DARK )) && [[ "$key" != nikon ]]; then
     recolour=( -channel RGB
       -fx "chroma=max(max(u.r,u.g),u.b)-min(min(u.r,u.g),u.b); accent=min(1,chroma/0.75); min(1,u+1-accent)"
       +channel )
-  fi
-  if (( FILM )) && [[ "$key" != nikon ]]; then
-    recolour+=( -channel R -evaluate multiply 0.949 -channel G -evaluate multiply 0.694
-                -channel B -evaluate multiply 0.204 +channel )   # x amber
   fi
   # Trim the PNG's transparent padding so the logo is placed by its visible letters. Fully transparent
   # pixels can hide stray RGB (green-grey in fujifilm.png) that resizing bleeds into the edges — reset it
@@ -813,14 +517,9 @@ prepare_logo() {  # height out: the logo trimmed, recoloured for the background 
     ${recolour[@]+"${recolour[@]}"} "$2"
 }
 
-# --- 9. Contact sheet edge print along the top border: the film stock like on real film — maker, film
-# simulation (if any), speed: "FUJIFILM PROVIA ISO 200", "SONY ISO 200" — then ▶ n, ▶ nA, ▶ n+1
-add_edge_print() {
-  (( FILM )) || return 0
-  edge_print_args $B $PS; args+=( "${EDGE_ARGS[@]}" )
-}
-
-# The edge print for a frame with side border b and text size pe -> EDGE_ARGS
+# Contact sheet edge print along the top border: the film stock like on real film — maker, film simulation
+# (if any), speed: "FUJIFILM PROVIA ISO 200", "SONY ISO 200" — then ▶ n, ▶ nA, ▶ n+1. For a frame with side
+# border b and text size pe -> EDGE_ARGS
 edge_print_args() {  # b size
   local b=$1 maker iso film n pe=$2 tri y base x t
   EDGE_ARGS=()
@@ -842,7 +541,7 @@ edge_print_args() {  # b size
   done
 }
 
-# --- 10. Render and write: optional final downscale (long side; fit = back to the original's long
+# Render and write: optional final downscale (long side; fit = back to the original's long
 # edge), done last so text and logo are rendered at full resolution; then the metadata
 write_out() {
   local long="$LONG"
@@ -863,20 +562,9 @@ write_out() {
   echo "→ $out"
 }
 
-frame_photo() {
-  read_meta; layout; background; ink; paper; place_photo
-  if (( MUSEUM )); then add_label
-  elif (( POSTER )); then add_poster
-  elif (( POSTCARD )); then add_caption
-  elif [[ -n "$COVER" ]]; then add_cover
-  else add_text; fi
-  add_logo; add_edge_print; write_out
-}
-
 # =====================================================================================================
 # Main loop
 # =====================================================================================================
-style_setup
 # Output name: <photo>_<border>_<size>.jpg, border made file-name safe ("#FFD6E0-#B5E2FA" -> FFD6E0-B5E2FA,
 # "rgb(40,60,90)" -> rgb40-60-90)
 tag=$(sed -E 's/[#()]//g; s/[^A-Za-z0-9.-]+/-/g; s/^-+|-+$//g' <<<"$BORDER")
@@ -885,11 +573,7 @@ for in in "$@"; do
   idx=$(( idx + 1 ))
   if [[ ! -f "$in" ]]; then echo "$ME: no such file: $in (skipped)" >&2; status=1; continue; fi
   out="${in%.*}_${tag}_${SIZE}.jpg"
-  if [[ -n "$LAYOUT" ]]; then
-    (( PLAN && $# > 1 )) && echo "== $in"
-    frame_layout
-  else
-    frame_photo
-  fi
+  (( PLAN && $# > 1 )) && echo "== $in"
+  frame_layout
 done
 exit $status

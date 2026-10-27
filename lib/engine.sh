@@ -21,7 +21,7 @@ igt() { local v="I_${1//-/_}__$2"; REPLY=${!v-}; }              # item field -> 
 # Units
 # =====================================================================================================
 # A length in pixels (REPLY). A length is a sum of terms, "a+b-c", each "<number><unit>[/<whole number>]"
-# and rounded towards zero on its own (so "5.5pmin+1pmin" is exactly u 55 + u 10). Context: S W H, FW
+# and rounded towards zero on its own (so "5.5pmin+1pmin" is S*55/1000 + S*10/1000). Context: S W H, FW
 # (0 = not known yet), PX_EM (the item's font size), PX_REF (what % refers to; empty = not allowed).
 # PX_MUL/PX_DIV scale every term before it's rounded (shadow padding). Errors point at section/key.
 px() {  # value [section key]
@@ -82,11 +82,11 @@ split_top() {
     case "$c" in
       "(") depth=$(( depth + 1 )); cur+=$c ;;
       ")") depth=$(( depth - 1 )); cur+=$c ;;
-      ,) if (( depth == 0 )); then SPLIT+=( "$(ly_trim "$cur")" ); cur=""; else cur+=$c; fi ;;
+      ,) if (( depth == 0 )); then ly_trim "$cur"; SPLIT+=( "$REPLY" ); cur=""; else cur+=$c; fi ;;
       *) cur+=$c ;;
     esac
   done
-  [[ -n "$(ly_trim "$cur")" ]] && SPLIT+=( "$(ly_trim "$cur")" )
+  ly_trim "$cur"; [[ -n "$REPLY" ]] && SPLIT+=( "$REPLY" )
   return 0
 }
 
@@ -248,7 +248,7 @@ ly_cell() {  # item
 ly_text_setup() {  # item
   local id=$1 t fam w st sz
   lv "i_$id" content; expand "$REPLY"; t=$REPLY
-  t=$(ly_trim "$t")
+  ly_trim "$t"; t=$REPLY
   if [[ -z "$t" ]]; then ist "$id" gone 1; return 0; fi
   tprop "$id" text-transform
   case "$REPLY" in
@@ -419,7 +419,7 @@ ly_background() {
       canvas=( -define gradient:angle=$ang "gradient:${a[0]}-${a[1]}" ) ;;
     \$*) lerr frame background "$v isn't set here" ;;
     material\(*\))
-      n=${v#material(}; n=$(ly_trim "${n%)}")
+      n=${v#material(}; ly_trim "${n%)}"; n=$REPLY
       # Light or dark stone (decides the ink without rendering it twice: terrazzo's chips are random)
       case "$n" in
         marble|marble-beige|terrazzo|linen) lum=0.9 ;;
@@ -428,7 +428,7 @@ ly_background() {
       esac
       BG_KIND=material; BG_NAME=$n ;;
     frost\(*\))
-      n=${v#frost(}; n=$(ly_trim "${n%)}")
+      n=${v#frost(}; ly_trim "${n%)}"; n=$REPLY
       case "$n" in light) lum=0.9 ;; dark) lum=0.1 ;; *) lerr frame background "frost(light) or frost(dark)" ;; esac
       BG_KIND=frost; BG_NAME=$n ;;
     film)     canvas=( "xc:#111111" ) ;;
@@ -961,7 +961,6 @@ ly_draw_rect() {  # item
 
 # One photo through a layout: read, resolve, then print the plan or draw and write
 frame_layout() {
-  KIND=layout; INSET=0; FILM=0; MUSEUM=0; POSTER=0; POSTCARD=0; COVER=""
   LOGO_ON=0; local id; for id in $LY_ITEMS; do lv "i_$id" type; [[ "$REPLY" == logo ]] && LOGO_ON=1; done
   read_meta
   read -r W H < <(magick "$in" -auto-orient -format "%w %h\n" info:)

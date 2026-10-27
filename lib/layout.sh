@@ -28,10 +28,10 @@ ly_keys() {  # section type -> the keys it allows
   esac
 }
 
-ly_trim() {  # text -> without surrounding whitespace
+ly_trim() {  # text -> REPLY without surrounding whitespace
   local t=$1
   t=${t#"${t%%[![:space:]]*}"}; t=${t%"${t##*[![:space:]]}"}
-  echo "$t"
+  REPLY=$t
 }
 
 layout_reset() {
@@ -58,7 +58,7 @@ layout_list() {  # every layout name along LAYOUT_PATH, once
       [[ "$seen" == *" $f "* ]] || seen="$seen$f "
     done
   done
-  echo $seen
+  echo $(printf '%s\n' $seen | sort)   # sorted by name, so "frost" comes before "frost-dark"
 }
 
 ly_available() {  # hint for errors
@@ -126,7 +126,7 @@ ly_load() {  # name [file that extends it under the same name]
   while IFS= read -r raw || [[ -n "$raw" ]]; do
     n=$(( n + 1 ))
     line=${raw%$'\r'}
-    line=$(ly_trim "$line")
+    ly_trim "$line"; line=$REPLY
     [[ -z "$line" || "$line" == \#* ]] && continue
     if [[ "$line" =~ ^\[([a-z0-9-]+)([[:space:]]+([a-z0-9-]+))?\]$ ]]; then
       t=${BASH_REMATCH[1]}
@@ -159,12 +159,12 @@ ly_load() {  # name [file that extends it under the same name]
         val=${val#\"}
         [[ "$val" == *\"* ]] || die "$file:$n: missing closing \" in the value of '$key'"
         t=${val#*\"}; val=${val%%\"*}
-        t=$(ly_trim "$t")
+        ly_trim "$t"; t=$REPLY
         [[ -z "$t" || "$t" == \#* ]] || die "$file:$n: unexpected text after the closing \": $t"
       else
         # A comment is " # …": # between whitespace (or at the end), so colours like #F3F0E8 are values
         if [[ "$val" =~ ^(.*[^[:space:]])?[[:space:]]+#([[:space:]].*)?$ ]]; then val=${BASH_REMATCH[1]}; fi
-        val=$(ly_trim "$val")
+        ly_trim "$val"; val=$REPLY
       fi
       case " $(ly_keys "$stype") " in
         *" $key "*) ;;

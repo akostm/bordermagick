@@ -46,6 +46,7 @@ Built on [ImageMagick](https://imagemagick.org), which draws every frame, textur
 - **Camera, lens and exposure** (`X-T20 ∙ XF18-55mm F2.8-4 R LM OIS`, `35.8 mm ∙ ƒ/11.0 ∙ 1/340s ∙ ISO 200`). Lens names come from exiftool's lens database.
 - **Maker logo**, downloaded once from Wikimedia Commons and kept for offline use (19 brands, or add your own PNG).
 - **Border styles:** solid colours and pastels, gradients, frosted glass, marble (white, dark, green, beige), terrazzo, linen, a museum mount with a gallery wall label (warm off-white, white or black mat), a Swiss-style poster (off-white or in the photo's own colour), a retro travel postcard, two text-free magazine-cover frames, and a film contact sheet showing the Fujifilm film simulation (`FUJIFILM PROVIA ISO 200 ▶ 33 ▶ 33A ▶ 34`).
+- **Your own layouts:** every style is a small layout file (border widths, background, and which text goes where). Write your own, or change a built-in one. See [Your own layouts](#your-own-layouts).
 - **Sizes:** full resolution, keep the original's long edge, or 4K / 2K / Full HD.
 - Everything is generated locally; the photo never leaves your machine.
 
@@ -73,6 +74,8 @@ Optionally put it on your `PATH`, e.g. `ln -s "$PWD/bordermagick" /usr/local/bin
 ./bordermagick -L                              # download all known logos now
 ```
 
+Run `./bordermagick --layouts` to list every layout.
+
 Each photo is written next to the original as `<photo>_<border>_<size>.jpg`, e.g. `IMG_0042_marble_4k.jpg`. Run `./bordermagick -h` for every option and border style.
 
 | Option | Values |
@@ -81,6 +84,29 @@ Each photo is written next to the original as `<photo>_<border>_<size>.jpg`, e.g
 | `-p` paper texture | `0`–`30`, default `6` (solid and gradient borders) |
 | `-s` size | `grow` (default), `fit`, `4k`, `2k`, `fhd`, or a long-side pixel count |
 | `-m` metadata | `keep` (default) or `strip` |
+
+## Your own layouts
+
+Each border style is a layout file in [`layouts/`](layouts). Put your own in `~/.bordermagick/layouts/<name>.layout` and use it with `-b <name>`; one with the same name as a built-in style replaces it. A layout can build on another, so a variant takes a few lines:
+
+```ini
+# ~/.bordermagick/layouts/stamped.layout: the classic strip plus a date stamp on the photo
+[layout]
+extends     = standard
+category    = Mine
+description = The classic strip with a date stamp on the photo
+
+[text stamp]
+cell    = photo bottom-right
+margin  = 0 3pmin 3pmin 0
+font    = 3pmin DIN Condensed
+color   = #FF8A1E
+content = {date:'%y %m %d}
+```
+
+The guide, [docs/layouts.md](docs/layouts.md), covers sizes, backgrounds, text from the photo's metadata and placement. `--dump-layout <name>` shows a layout with everything it inherits, `--tags photo.jpg` shows the values a layout can print, and `--plan` shows where everything goes.
+
+> The layout format is a **preview** in 1.3: it may still change in 1.x releases.
 
 ## Logos
 
@@ -164,6 +190,7 @@ Select photos in Finder → right-click → **Quick Actions → Frame with borde
 
 Tips:
 - To skip the metadata question, leave out step 7 and write `-m keep` or `-m strip` directly in the script; or make two shortcuts.
+- Your own layouts can go in the dictionary too: add them to a category's list, or add a key of their own.
 
 ## Development
 
@@ -182,7 +209,7 @@ Real photos can be added as arguments. Renders go to `tests/out/` (not committed
 tests/unit.sh
 ```
 
-The script loads its helpers from `lib/`, so keep that folder next to `bordermagick` (a symlink to the script is fine).
+The script loads its engine from `lib/` and the built-in styles from `layouts/`, so keep both folders next to `bordermagick` (a symlink to the script is fine). `tests/engine/` holds test layouts for the engine; [docs/layouts.md](docs/layouts.md#10-for-developers) has notes on the code.
 
 ## License
 
