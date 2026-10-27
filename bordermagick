@@ -440,6 +440,13 @@ read_meta() {
   return 0
 }
 
+# The photo's most common colour (k-means), deepened so bold type stays readable on it
+dominant_colour() {
+  local c
+  c=$(magick "$in" -resize 200x200 -kmeans 5 -format %c histogram:info: | sort -rn | head -1 | grep -oE '#[0-9A-Fa-f]{6}')
+  magick xc:"$c" -modulate 80,130 -format "#%[hex:u.p{0,0}]" info:
+}
+
 # Poster: everything is measured from the sheet width (photo width + margins), and the text is rendered
 # first because its height sets the sheet height. Paper and ink: off-white with black, or the photo's most
 # common colour (deepened so type stays bold on it) with black or white, whichever reads better.
@@ -450,8 +457,7 @@ poster_layout() {
   if [[ "$BORDER" == poster ]]; then
     PBG="#F6F5F1"; PINK="#111111"
   else
-    PBG=$(magick "$in" -resize 200x200 -kmeans 5 -format %c histogram:info: | sort -rn | head -1 | grep -oE '#[0-9A-Fa-f]{6}')
-    PBG=$(magick xc:"$PBG" -modulate 80,130 -format "#%[hex:u.p{0,0}]" info:)
+    PBG=$(dominant_colour)
     if (( $(magick xc:"$PBG" -format "%[fx:luminance<0.45]" info:) )); then PINK="#FFFFFF"; else PINK="#111111"; fi
   fi
   # Title: huge, left aligned, wrapping to the sheet width, tight leading. (The tight leading also shortens
@@ -629,18 +635,20 @@ paper() {
 # light catches it below/right
 place_photo() {
   args=( -size ${FW}x${FH} "${canvas[@]}" ${shadow[@]+"${shadow[@]}"} )
-  if (( MUSEUM )); then
-    # Bevelled mat opening: a bright core edge around the photo, with a soft shadow on its top and left
-    # where the light falls into the cut
-    local bev=$(( S / 250 + 2 ))
-    args+=( -fill "$CORE" -draw "rectangle $(( B - bev )),$(( TOPB - bev )) $(( B + W + bev - 1 )),$(( TOPB + H + bev - 1 ))"
-            \( -size $(( W + 2 * bev ))x$(( H + 2 * bev )) xc:none -fill "rgba(0,0,0,0.10)"
-               -draw "rectangle 0,0 $(( W + 2 * bev - 1 )),$(( bev / 2 ))" -draw "rectangle 0,0 $(( bev / 2 )),$(( H + 2 * bev - 1 ))"
-               -blur 0x1 \) -gravity northwest -geometry +$(( B - bev ))+$(( TOPB - bev )) -composite )
-  fi
+  if (( MUSEUM )); then photo_bevel_args $B $TOPB $(( S / 250 + 2 )) "$CORE"; args+=( "${BEVEL_ARGS[@]}" ); fi
   args+=( \( "$in" -auto-orient \) -gravity northwest -geometry +$B+$TOPB -composite )
   if (( INSET )); then photo_inset_args $B $B $B; args+=( "${INSET_ARGS[@]}" ); fi
   return 0
+}
+
+# Bevelled mat opening around a photo at x,y: a bright core edge of the given width, with a soft shadow on
+# its top and left where the light falls into the cut. -> BEVEL_ARGS
+photo_bevel_args() {  # x y width colour
+  local x=$1 y=$2 bev=$3
+  BEVEL_ARGS=( -fill "$4" -draw "rectangle $(( x - bev )),$(( y - bev )) $(( x + W + bev - 1 )),$(( y + H + bev - 1 ))"
+               \( -size $(( W + 2 * bev ))x$(( H + 2 * bev )) xc:none -fill "rgba(0,0,0,0.10)"
+                  -draw "rectangle 0,0 $(( W + 2 * bev - 1 )),$(( bev / 2 ))" -draw "rectangle 0,0 $(( bev / 2 )),$(( H + 2 * bev - 1 ))"
+                  -blur 0x1 \) -gravity northwest -geometry +$(( x - bev ))+$(( y - bev )) -composite )
 }
 
 # Soft drop shadow under a photo at x,y so it floats above the glass (built small and scaled up); the
@@ -809,7 +817,13 @@ prepare_logo() {  # height out: the logo trimmed, recoloured for the background 
 # simulation (if any), speed: "FUJIFILM PROVIA ISO 200", "SONY ISO 200" — then ▶ n, ▶ nA, ▶ n+1
 add_edge_print() {
   (( FILM )) || return 0
-  local maker iso film num n pe tri y base x t
+  edge_print_args $B $PS; args+=( "${EDGE_ARGS[@]}" )
+}
+
+# The edge print for a frame with side border b and text size pe -> EDGE_ARGS
+edge_print_args() {  # b size
+  local b=$1 maker iso film n pe=$2 tri y base x t
+  EDGE_ARGS=()
   case "$key" in
     om) maker="OM SYSTEM" ;; iphone|ipad) maker="APPLE" ;;
     *) maker=$(tr '[:lower:]' '[:upper:]' <<<"$key") ;;
@@ -817,14 +831,14 @@ add_edge_print() {
   iso=$X_ISO
   film=$(echo $maker $T_FILM ${iso:+ISO $iso})   # (echo joins the non-empty parts)
   n=$T_frame
-  pe=$PS; tri=$(( pe * 60 / 100 ))                          # same size as the other text; triangle size
-  y=$(( B * 85 / 100 )); base=$(( FH - y - pe * 50 / 100 ))  # y = centre of the row, from the top
-  args+=( -fill "$AMBER" -stroke none -font "$FONT_COND" -pointsize $pe -gravity southwest
-          -annotate +$B+$(( base - pe * 18 / 100 )) "$(im_text "$film")" )
+  tri=$(( pe * 60 / 100 ))                                    # triangle size
+  y=$(( b * 85 / 100 )); base=$(( FH - y - pe * 50 / 100 ))  # y = centre of the row, from the top
+  EDGE_ARGS+=( -fill "$AMBER" -stroke none -font "$FONT_COND" -pointsize $pe -gravity southwest
+               -annotate +$b+$(( base - pe * 18 / 100 )) "$(im_text "$film")" )
   for t in "30:$n" "58:${n}A" "84:$(( n + 1 ))"; do
     x=$(( FW * ${t%%:*} / 100 ))
-    args+=( -draw "polygon $x,$(( y - tri / 2 )) $(( x + tri )),$y $x,$(( y + tri / 2 ))"
-            -annotate +$(( x + tri * 16 / 10 ))+$(( base - pe * 18 / 100 )) "$(im_text "${t#*:}")" )
+    EDGE_ARGS+=( -draw "polygon $x,$(( y - tri / 2 )) $(( x + tri )),$y $x,$(( y + tri / 2 ))"
+                 -annotate +$(( x + tri * 16 / 10 ))+$(( base - pe * 18 / 100 )) "$(im_text "${t#*:}")" )
   done
 }
 

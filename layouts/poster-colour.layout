@@ -1,0 +1,7 @@
+# The sheet in the photo's own main colour, with black or white type, whichever reads better
+[layout]
+extends     = poster
+description = Swiss-style poster on the photo's main colour
+
+[frame]
+background = dominant

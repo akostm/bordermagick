@@ -1,0 +1,46 @@
+# Museum mount: a wide mat, taller at the bottom, with a bevelled opening and a gallery wall label under
+# the photo's right edge: title, place and year, medium, camera and lens, exposure
+[layout]
+category    = Gallery
+description = Wide mat with a bevelled opening and a museum wall label
+
+[frame]
+padding    = 14pmin 14pmin 26pmin
+background = #F3F0E8
+texture    = paper $paper
+font       = 2pmin Georgia
+color      = #6E6A64
+
+[photo]
+effect = bevel 0.4pmin+2px #FBFAF6
+
+[bottom]
+columns     = 1fr auto
+padding     = 5.5pmin 0 0 0
+align-items = start
+
+[text title]
+cell    = bottom 2
+font    = bold 2.6pmin Georgia
+color   = #2A2826
+content = {title|city|filename}
+
+[text where]
+cell       = bottom 2
+font-style = italic
+color      = #2A2826
+margin     = 1em/3 0 0 0
+content    = {place}, {date:%Y}
+
+[text medium]
+cell    = bottom 2
+margin  = 3em/4 0 0 0
+content = Digital photograph[, {brand} {film}]
+
+[text camera]
+cell    = bottom 2
+content = {body} ∙ {lens}
+
+[text exposure]
+cell    = bottom 2
+content = {exposure}

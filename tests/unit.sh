@@ -106,6 +106,11 @@ check "px pw, ph, fw"     "150 50 16" "$(pxv 10pw) $(pxv 5ph) $(pxv 1fw)"
 check "px em, px, 0"      "20 7 0"   "$(pxv 0.5em) $(pxv 7px) $(pxv 0)"
 check "px %"              "250"      "$(pxv 25% 1000)"
 check "px negative"       "-10"      "$(pxv -1pmin)"
+check "px sum of terms"   "$(( 1234 * 55 / 1000 + 1234 * 10 / 1000 ))" "$(S=1234 pxv 5.5pmin+1pmin)"
+check "px division"       "13 30"    "$(PX_EM=40 pxv 1em/3) $(pxv 3em/4)"
+check "px difference"     "25"       "$(pxv 3pw-0.5em)"
+check "px term rounding"  "1 2"      "$(FW=1003 pxv 1fw/6) $(FW=1003 pxv 1fw/6+1px)"
+check "px scaled"         "10"       "$(PX_MUL=9 PX_DIV=4 PX_EM=40 pxv 1em/9)"
 fails_with "px no unit"   "needs a unit"         px 3
 fails_with "px bad unit"  "unknown unit 'pt'"    px 3pt
 fails_with "px % here"    "% can't be used here" px 5%
@@ -137,16 +142,19 @@ B="$HERE/engine/bad"
 bad() { ( cd "$OUT/photos" && BORDERMAGICK_LAYOUTS="$B" "$ROOT/bordermagick" --plan -b "$1" fuji_33.jpg ); }
 fails_with "engine bad unit"    "$B/bad-unit.layout:2: '3pt': unknown unit 'pt'"       bad bad-unit
 fails_with "engine bad font"    "$B/bad-font.layout:3: no font 'No Such Font'"         bad bad-font
-fails_with "engine background"  "background film is not available yet"                bad bad-bg
 fails_with "engine material"    "unknown material 'granite'"                          bad bad-material
 fails_with "engine frost"       "frost(light) or frost(dark)"                         bad bad-frost
-fails_with "engine effect"      "effect is none, inset or drop-shadow"                bad bad-effect
+fails_with "engine effect"      "effect is none, inset, drop-shadow or bevel"                bad bad-effect
 fails_with "engine text effect" "text-effect is none or engrave"                      bad bad-text-effect
-fails_with "engine later item"  "[edge-print] items are not available yet"             bad later-item
+fails_with "engine later item"  "[image] items are not available yet"             bad later-item
 fails_with "engine anchor"      "'middle' is not a photo anchor"                      bad bad-anchor
 fails_with "engine fw side"     "fw can't be used here"                               bad fw-side
 fails_with "engine no room"     "[bottom] has no room"                                bad no-room
 fails_with "engine no column"   "[bottom] has only 1 column(s)"                       bad no-column
+fails_with "engine trim"        "text-box-trim is none or start"                      bad bad-trim
+fails_with "engine text-top"    "vertical-align = text-top needs top"                 bad text-top-no-top
+fails_with "engine paper"       "paper strength is 0 to 30, or a fraction"            bad bad-paper
+fails_with "engine div zero"    "division by 0"                                       bad div-zero
 fails_with "engine colour"      "$B/bad-colour.layout:2: unknown colour 'notacolour'"  bad bad-colour
 
 # --- Engine: plans of the test layouts on the test photos

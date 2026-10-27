@@ -1,0 +1,62 @@
+# Swiss-style poster: the photo on a sheet, a huge title, a rule, and a grid of place and date, camera and
+# lens, and exposure. Everything is measured from the sheet width; the sheet grows with the title.
+[layout]
+category    = Print
+description = Swiss-style poster with a huge title and a three-column grid
+
+[frame]
+padding    = 6pw 6pw auto 6pw
+background = #F6F5F1
+texture    = paper $paper
+font       = 2.2fw HelveticaNeue-Medium
+color      = contrast
+
+[top]
+columns = 1fr
+
+[text number]
+cell           = top 1
+position       = absolute
+right          = 0
+top            = 3pw-0.5em
+vertical-align = text-top
+content        = No. {frame}
+
+[bottom]
+columns     = 28% 44% 1fr
+rows        = auto auto auto
+padding     = 4.5fw 0 6pw 0
+align-items = start
+
+[text title]
+cell           = bottom 1-3/1
+width          = 100%
+margin         = 0 0 4.5fw 0
+font           = 11fw HelveticaNeue-Bold
+letter-spacing = -0.025em
+line-height    = 0.82
+content        = {title|city|filename}
+
+[rule line]
+cell      = bottom 1-3/2
+thickness = 1fw/6+2px
+margin    = 0 0 4.5fw/2 0
+
+# Long lines wrap within their column
+[text where]
+cell        = bottom 1/3
+width       = 100%-1em
+line-height = 1.25
+content     = {place}\n{date}
+
+[text camera]
+cell        = bottom 2/3
+width       = 100%-1em
+line-height = 1.25
+content     = {body}\n{lens}
+
+[text exposure]
+cell        = bottom 3/3
+width       = 100%-1em
+line-height = 1.25
+content     = {focal} ∙ {aperture}\n{shutter} ∙ {iso}

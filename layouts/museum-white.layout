@@ -1,0 +1,9 @@
+[layout]
+extends     = museum
+description = Museum mount on a white mat
+
+[frame]
+background = #FAFAF8
+
+[photo]
+effect = bevel 0.4pmin+2px #FFFFFF

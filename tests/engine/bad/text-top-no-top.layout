@@ -1,0 +1,7 @@
+[frame]
+padding = 3pmin
+
+[text t]
+position = absolute
+vertical-align = text-top
+content = x

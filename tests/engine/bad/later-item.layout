@@ -1,5 +1,6 @@
 [frame]
 padding = 3pmin
 
-[edge-print e]
-cell = top 1
+[image sig]
+cell = bottom 1
+src = sig.png

@@ -1,0 +1,23 @@
+# Retro travel postcard: the city (else the country) in big condensed capitals across the top of the
+# photo, over a soft shadow, on a thin cream border. A long name shrinks to fit.
+[layout]
+category    = Print
+description = Travel postcard with the location in big retro capitals
+
+[frame]
+padding    = 4.5pmin
+background = #FBF9F3
+texture    = paper $paper
+
+[text caption]
+cell           = photo top-center
+margin         = 1em/3 0 0 0
+font           = 17pmin Futura-CondExtraBold
+letter-spacing = 0.05em
+text-transform = uppercase
+text-box-trim  = start
+color          = #FFFDF6
+text-shadow    = 1em/25+1px 1em/25+1px 1em/9 rgba(0,0,0,0.6)
+max-width      = 88%
+overflow       = shrink
+content        = {city|country}

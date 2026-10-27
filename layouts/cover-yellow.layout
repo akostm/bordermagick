@@ -1,0 +1,14 @@
+# Magazine cover: a thick yellow rectangle inset on the full-bleed photo; no text, same size as the photo
+[layout]
+category    = Print
+description = Magazine-cover yellow rectangle on the photo, no text
+
+[frame]
+padding    = 0
+background = #E3120B
+
+[rect box]
+cell         = photo center
+inset        = 4.5pmin
+stroke       = #FFCC00
+stroke-width = 3.8pmin

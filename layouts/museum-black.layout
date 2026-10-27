@@ -1,0 +1,18 @@
+# Black mat board is smooth: the paper relief shows strongly on black, so a third of the strength
+[layout]
+extends     = museum
+description = Museum mount on a black mat
+
+[frame]
+background = #161616
+texture    = paper $paper/3
+color      = #A39F98
+
+[photo]
+effect = bevel 0.4pmin+2px #ECEAE4
+
+[text title]
+color = #E8E6E1
+
+[text where]
+color = #E8E6E1

@@ -20,30 +20,41 @@ igt() { local v="I_${1//-/_}__$2"; REPLY=${!v-}; }              # item field -> 
 # =====================================================================================================
 # Units
 # =====================================================================================================
-# A length in pixels (REPLY), rounded towards zero. Context: S W H, FW (0 = not known yet), PX_EM (the
-# item's font size), PX_REF (what % refers to; empty = not allowed). Errors point at section/key if given.
+# A length in pixels (REPLY). A length is a sum of terms, "a+b-c", each "<number><unit>[/<whole number>]"
+# and rounded towards zero on its own (so "5.5pmin+1pmin" is exactly u 55 + u 10). Context: S W H, FW
+# (0 = not known yet), PX_EM (the item's font size), PX_REF (what % refers to; empty = not allowed).
+# PX_MUL/PX_DIV scale every term before it's rounded (shadow padding). Errors point at section/key.
 px() {  # value [section key]
-  local v=$1 int frac milli unit r
-  if ! [[ "$v" =~ ^(-?)([0-9]*)(\.([0-9]+))?([a-z%]*)$ ]] || [[ -z "${BASH_REMATCH[2]}${BASH_REMATCH[4]}" ]]; then
-    px_err "'$v' is not a length" "${2:-}" "${3:-}"
-  fi
-  int=${BASH_REMATCH[2]:-0}; frac="${BASH_REMATCH[4]}000"; unit=${BASH_REMATCH[5]}
-  milli=$(( 10#$int * 1000 + 10#${frac:0:3} ))
-  case "$unit" in
-    pmin) r=$(( S * milli / 100000 )) ;;
-    pw)   r=$(( W * milli / 100000 )) ;;
-    ph)   r=$(( H * milli / 100000 )) ;;
-    fw)   (( ${FW:-0} > 0 )) || px_err "'$v': fw can't be used here (the frame width isn't known yet)" "${2:-}" "${3:-}"
-          r=$(( FW * milli / 100000 )) ;;
-    em)   r=$(( ${PX_EM:-0} * milli / 1000 )) ;;
-    %)    [[ -n "${PX_REF:-}" ]] || px_err "'$v': % can't be used here" "${2:-}" "${3:-}"
-          r=$(( PX_REF * milli / 100000 )) ;;
-    px)   r=$(( milli / 1000 )) ;;
-    "")   (( milli == 0 )) || px_err "'$v' needs a unit: pmin, pw, ph, fw, em, % or px" "${2:-}" "${3:-}"; r=0 ;;
-    *)    px_err "'$v': unknown unit '$unit'" "${2:-}" "${3:-}" ;;
-  esac
-  [[ "$v" == -* ]] && r=$(( -r ))
-  REPLY=$r
+  local v=$1 t terms sign int frac milli unit n num den sum=0 ref scale
+  [[ -n "$v" ]] || px_err "an empty length" "${2:-}" "${3:-}"
+  terms=${v//+/ +}; terms=${terms//-/ -}
+  for t in $terms; do
+    sign=1
+    case "$t" in +*) t=${t#+} ;; -*) t=${t#-}; sign=-1 ;; esac
+    if ! [[ "$t" =~ ^([0-9]*)(\.([0-9]+))?([a-z%]*)(/([0-9]+))?$ ]] || [[ -z "${BASH_REMATCH[1]}${BASH_REMATCH[3]}" ]]; then
+      px_err "'$v' is not a length" "${2:-}" "${3:-}"
+    fi
+    int=${BASH_REMATCH[1]:-0}; frac="${BASH_REMATCH[3]}000"; unit=${BASH_REMATCH[4]}; n=${BASH_REMATCH[6]:-1}
+    (( 10#$n > 0 )) || px_err "'$v': division by 0" "${2:-}" "${3:-}"
+    milli=$(( 10#$int * 1000 + 10#${frac:0:3} ))
+    scale=100000
+    case "$unit" in
+      pmin) ref=$S ;;
+      pw)   ref=$W ;;
+      ph)   ref=$H ;;
+      fw)   (( ${FW:-0} > 0 )) || px_err "'$v': fw can't be used here (the frame width isn't known yet)" "${2:-}" "${3:-}"
+            ref=$FW ;;
+      em)   ref=${PX_EM:-0}; scale=1000 ;;
+      %)    [[ -n "${PX_REF:-}" ]] || px_err "'$v': % can't be used here" "${2:-}" "${3:-}"
+            ref=$PX_REF ;;
+      px)   ref=1; scale=1000 ;;
+      "")   (( milli == 0 )) || px_err "'$v' needs a unit: pmin, pw, ph, fw, em, % or px" "${2:-}" "${3:-}"; ref=0 ;;
+      *)    px_err "'$v': unknown unit '$unit'" "${2:-}" "${3:-}" ;;
+    esac
+    num=$(( ref * milli * ${PX_MUL:-1} )); den=$(( scale * 10#$n * ${PX_DIV:-1} ))
+    sum=$(( sum + sign * (num / den) ))
+  done
+  REPLY=$sum
   return 0
 }
 px_err() { if [[ -n "${2:-}" ]]; then lerr "$2" "$3" "$1"; else die "$1"; fi; }
@@ -227,7 +238,7 @@ ly_cell() {  # item
   local m=() mm
   lv "i_$id" margin; box4 "${REPLY:-0}" "i_$id" margin; m=($REPLY)
   PX_REF="" PX_EM=0
-  igt "$id" size; PX_EM=${REPLY:-0}
+  igt "$id" psize; [[ -n "$REPLY" ]] || igt "$id" size; PX_EM=${REPLY:-0}
   for mm in 0 1 2 3; do px "${m[mm]}" "i_$id" margin; m[mm]=$REPLY; done
   ist "$id" mt "${m[0]}"; ist "$id" mr "${m[1]}"; ist "$id" mb "${m[2]}"; ist "$id" ml "${m[3]}"
   return 0
@@ -272,6 +283,13 @@ ly_text_render() {  # item [size] [wrap-width]
   fi
   ist "$id" kern "$kern"; ist "$id" psize "$size"
   opts=( -background none -font "$font" -pointsize "$size" )
+  # text-box-trim = start: the letters start at the top edge of the box instead of below the font's ascent
+  # (ImageMagick does that for label: and caption: whenever a gravity is set)
+  tprop "$id" text-box-trim
+  case "${REPLY:-none}" in
+    none) opts+=( +gravity ) ;; start) opts+=( -gravity northwest ) ;;
+    *) lerr "$TP_SEC" text-box-trim "text-box-trim is none or start" ;;
+  esac
   (( kern )) && opts+=( -kerning "$kern" )
   (( ils )) && opts+=( -interline-spacing "$ils" )
   f="$TMP/ly_${id//-/_}.miff"
@@ -291,34 +309,36 @@ ly_text_render() {  # item [size] [wrap-width]
   return 0
 }
 
-# Shadows of a text item, once its size is final: a blurred copy per shadow, padded so the blur isn't
-# cut off. I_*__shadows = lines of "file dx dy pad".
-ly_text_shadows() {  # item
-  local id=$1 t opts=() wrap ils k s d1 d2 bl col p sig shs=() i=0 f ssec
-  tprop "$id" text-shadow; [[ -n "$REPLY" ]] || { ist "$id" shadows ""; return 0; }
+# Shadows of a text item at x,y, added to args: a blurred copy per shadow, padded so the blur isn't cut
+# off. Built inside the one magick command (a blur written to a file would be rounded to 16 bits).
+ly_text_shadows() {  # item x y
+  local id=$1 t opts=() wrap k ils s d1 d2 bl col p sig ssec
+  tprop "$id" text-shadow; [[ -n "$REPLY" ]] || return 0
   ssec=$TP_SEC; split_top "$REPLY"
   igt "$id" text; t=$(im_text "$REPLY")
   igt "$id" psize; PX_EM=$REPLY PX_REF=""
-  opts=( -background none )
-  igt "$id" font; opts+=( -font "$REPLY" -pointsize "$PX_EM" )
-  igt "$id" kern; (( REPLY )) && opts+=( -kerning "$REPLY" )
-  igt "$id" ils; (( REPLY )) && opts+=( -interline-spacing "$REPLY" )
+  igt "$id" font; opts=( -background none -font "$REPLY" -pointsize "$PX_EM" )
+  tprop "$id" text-box-trim; if [[ "$REPLY" == start ]]; then opts+=( -gravity northwest ); else opts+=( +gravity ); fi
+  igt "$id" kern; k=$REPLY; (( k )) && opts+=( -kerning "$k" )
+  igt "$id" ils; ils=$REPLY; (( ils )) && opts+=( -interline-spacing "$ils" )
   igt "$id" wrap; wrap=$REPLY
-  igt "$id" img; f=$REPLY
   for s in "${SPLIT[@]}"; do
     read -r d1 d2 bl col <<<"$s"
     [[ -n "$col" ]] || lerr "$ssec" text-shadow "a shadow is <x> <y> <blur> <colour>"
     px "$d1" "$ssec" text-shadow; d1=$REPLY; px "$d2" "$ssec" text-shadow; d2=$REPLY
-    px "$bl" "$ssec" text-shadow; sig=$REPLY; p=$(( (sig * 9 + 3) / 4 ))
+    px "$bl" "$ssec" text-shadow; sig=$REPLY
+    PX_MUL=9 PX_DIV=4 px "$bl" "$ssec" text-shadow; p=$REPLY   # padding: 9/4 of the blur
     colour "$col" "$ssec" text-shadow; col=$REPLY
     if [[ -n "$wrap" ]]; then
-      magick "${opts[@]}" -fill "$col" -size "${wrap}x" caption:"$t" -bordercolor none -border $p -blur 0x$sig "${f%.miff}_s$i.miff"
+      args+=( \( +size "${opts[@]}" -fill "$col" -size "${wrap}x" caption:"$t" +size -bordercolor none -border $p -blur 0x$sig \) )
     else
-      magick "${opts[@]}" -fill "$col" label:"$t" -bordercolor none -border $p -blur 0x$sig "${f%.miff}_s$i.miff"
+      args+=( \( +size "${opts[@]}" -fill "$col" label:"$t" -bordercolor none -border $p -blur 0x$sig \) )
     fi
-    shs+=( "${f%.miff}_s$i.miff $d1 $d2 $p" ); i=$(( i + 1 ))
+    args+=( -gravity northwest -geometry +$(( $2 + d1 - p ))+$(( $3 + d2 - p )) -composite )
   done
-  printf -v "I_${id//-/_}__shadows" '%s\n' "${shs[@]}"
+  # (settings outlive the parentheses: put back what later text expects)
+  (( k )) && args+=( -kerning 0 )
+  (( ils )) && args+=( -interline-spacing 0 )
   return 0
 }
 
@@ -330,11 +350,20 @@ ly_text_fit() {  # item width
   tprop "$id" overflow; mode=${REPLY:-wrap}
   case "$mode" in
     wrap)   ly_text_render "$id" "" "$maxw" ;;
-    shrink) igt "$id" size; size=$(( REPLY * maxw / w )); ly_text_render "$id" "$size" ;;
+    shrink) igt "$id" size; size=$(( REPLY * maxw / w )); ly_text_render "$id" "$size"; ly_cell "$id" ;;
     clip)   igt "$id" img; magick "$REPLY" -crop "${maxw}x+0+0" +repage "$REPLY"; ist "$id" w "$maxw" ;;
     *)      lerr "$TP_SEC" overflow "overflow is wrap, shrink or clip" ;;
   esac
   return 0
+}
+
+# Text with a width is a block of that width (of the space it has) and always wraps; false without one
+ly_text_width() {  # item space
+  lv "i_$1" width; [[ -n "$REPLY" ]] || return 1
+  local wv=$REPLY; igt "$1" psize
+  PX_EM=$REPLY PX_REF=$2 px "$wv" "i_$1" width
+  (( REPLY > 0 )) || lerr "i_$1" width "the width comes out as $REPLY px"
+  ly_text_render "$1" "" "$REPLY"
 }
 
 # The widest an item may be: its max-width (of the space it has), else that space
@@ -402,7 +431,8 @@ ly_background() {
       n=${v#frost(}; n=$(ly_trim "${n%)}")
       case "$n" in light) lum=0.9 ;; dark) lum=0.1 ;; *) lerr frame background "frost(light) or frost(dark)" ;; esac
       BG_KIND=frost; BG_NAME=$n ;;
-    film|dominant) lerr frame background "background $v is not available yet" ;;
+    film)     canvas=( "xc:#111111" ) ;;
+    dominant) canvas=( "xc:$(dominant_colour)" ) ;;
     *)
       if [[ "$v" =~ ^([^-]+)-([^-]+)$ ]]; then   # "#A-#B" (a gradient from -b)
         colour "${BASH_REMATCH[1]}" frame background; colour "${BASH_REMATCH[2]}" frame background
@@ -417,8 +447,12 @@ ly_background() {
   lv photo effect; PHOTO_FX=${REPLY:-none}
   case "$PHOTO_FX" in
     none|inset|drop-shadow) ;;
-    bevel*) lerr photo effect "effect $PHOTO_FX is not available yet" ;;
-    *) lerr photo effect "effect is none, inset or drop-shadow" ;;
+    bevel\ *)
+      read -r BEVEL_W BEVEL_C <<<"${PHOTO_FX#bevel }"
+      [[ -n "$BEVEL_C" ]] || lerr photo effect "bevel <width> <colour>"
+      PX_REF="" px "$BEVEL_W" photo effect; BEVEL_W=$REPLY
+      colour "$BEVEL_C" photo effect; BEVEL_C=$REPLY; PHOTO_FX=bevel ;;
+    *) lerr photo effect "effect is none, inset, drop-shadow or bevel <width> <colour>" ;;
   esac
   lv frame text-effect; TEXT_FX=${REPLY:-none}
   case "$TEXT_FX" in none|engrave) ;; *) lerr frame text-effect "text-effect is none or engrave" ;; esac
@@ -428,7 +462,9 @@ ly_background() {
     ""|none) ;;
     paper) PAPER_K=$PAPER ;;
     paper\ *) PAPER_K=${REPLY#paper }
-              [[ "$PAPER_K" =~ ^[0-9]+$ ]] && (( PAPER_K <= 30 )) || lerr frame texture "paper strength is 0 to 30" ;;
+              [[ "$PAPER_K" =~ ^[0-9]+(/[1-9][0-9]*)?$ ]] || lerr frame texture "paper strength is 0 to 30, or a fraction like 6/3"
+              PAPER_K=$(( PAPER_K ))
+              (( PAPER_K <= 30 )) || lerr frame texture "paper strength is 0 to 30" ;;
     *) lerr frame texture "texture is paper, paper <0–30> or none" ;;
   esac
   (( PAPER_K > 0 )) && PAPER_ON=1
@@ -482,13 +518,14 @@ ly_resolve() {
   # Items: placement, then content (text measured at its natural size)
   PLAN_ITEMS=""
   for id in $LY_ITEMS; do
-    for t in gone img w h x y shadows annot size; do ist "$id" $t ""; done
+    for t in gone img w h x y shadows annot size psize wrap ils kern base cellw; do ist "$id" $t ""; done
     lv "i_$id" type; t=$REPLY
     case "$t" in
       text) ly_cell "$id"; ly_text_setup "$id" ;;
       logo) ly_cell "$id"; ly_logo_setup "$id" ;;
       rule) ly_cell "$id"; ly_rule_setup "$id" ;;
       rect) ly_cell "$id" ;;
+      edge-print) ly_cell "$id"; ly_edge_setup "$id" ;;
       *) lerr "i_$id" type "[$t] items are not available yet" ;;
     esac
     igt "$id" gone; [[ -n "$REPLY" ]] && continue
@@ -525,7 +562,7 @@ ly_keep_clear() {
     v="BAND_${band}_ids"; ids=${!v-}; [[ -n "$ids" ]] || continue
     top=""; bot=""; cols=""
     for id in $ids; do
-      lv "i_$id" type; [[ "$REPLY" == rect ]] && continue
+      lv "i_$id" type; [[ "$REPLY" == rect || "$REPLY" == edge-print ]] && continue
       igt "$id" cs; cs=$REPLY
       igt "$id" x; x=$REPLY; igt "$id" y; y=$REPLY; igt "$id" w; w=$REPLY; igt "$id" h; h=$REPLY
       igt "$id" base; b=${REPLY:-$(( y + h ))}
@@ -562,6 +599,7 @@ ly_band() {  # band
     igt "$id" cs; cs=$REPLY; igt "$id" ce; ce=$REPLY
     (( ce <= n )) || lerr "i_$id" cell "[$band] has only $n column(s)"
     (( cs == ce )) || continue
+    lv "i_$id" width; [[ -n "$REPLY" ]] && continue
     igt "$id" w; w=${REPLY:-0}; igt "$id" ml; w=$(( w + REPLY )); igt "$id" mr; w=$(( w + REPLY ))
     (( w > a[cs-1] )) && a[cs-1]=$w
   done
@@ -577,7 +615,7 @@ ly_band() {  # band
     ist "$id" cellw "$sp"
     lv "i_$id" type
     case "$REPLY" in
-      text) ly_maxw "$id" "$sp"; ly_text_fit "$id" "$REPLY" ;;
+      text) ly_text_width "$id" "$sp" || { ly_maxw "$id" "$sp"; ly_text_fit "$id" "$REPLY"; } ;;
       rule) igt "$id" ml; w=$(( sp - REPLY )); igt "$id" mr; ist "$id" w $(( w - REPLY )) ;;
     esac
   done
@@ -608,7 +646,7 @@ ly_stacks() {  # band ids
   STACK_CELLS=""
   for id in $2; do
     igt "$id" abs; [[ "$REPLY" == 1 ]] && continue
-    lv "i_$id" type; [[ "$REPLY" == rect ]] && continue
+    lv "i_$id" type; [[ "$REPLY" == rect || "$REPLY" == edge-print ]] && continue
     igt "$id" cs; key=$REPLY; igt "$id" ce; key="$key-$REPLY"; igt "$id" row; key="$key@$REPLY"
     igt "$id" h; h=${REPLY:-0}; igt "$id" mt; h=$(( h + REPLY )); igt "$id" mb; h=$(( h + REPLY ))
     local v="STK_${1}_${key//[-@]/_}"
@@ -646,7 +684,7 @@ ly_band_place() {  # band
     v="COL_${band}_$cs"; cx=${!v}
     for id in $ids; do
       igt "$id" abs; [[ "$REPLY" == 1 ]] && continue
-      lv "i_$id" type; [[ "$REPLY" == rect ]] && continue
+      lv "i_$id" type; [[ "$REPLY" == rect || "$REPLY" == edge-print ]] && continue
       igt "$id" cs; [[ "$REPLY" == "$cs" ]] || continue
       igt "$id" ce; [[ "$REPLY" == "$ce" ]] || continue
       igt "$id" row; [[ "$REPLY" == "$row" ]] || continue
@@ -660,6 +698,7 @@ ly_band_place() {  # band
   for id in $ids; do
     igt "$id" abs; [[ "$REPLY" == 1 ]] && ly_absolute "$id" "$BX" "$BY" "$BW" "$BH"
     lv "i_$id" type; [[ "$REPLY" == rect ]] && ly_rect "$id" "$BX" "$BY" "$BW" "$BH"
+    [[ "$REPLY" == edge-print ]] && ly_edge_place "$id"
   done
   printf -v "BANDBOX_$band" '%s' "$BX $BY $BW $BH"
   return 0
@@ -683,7 +722,7 @@ ly_justify() {  # item cell-x cell-w -> sets x
 ly_absolute() {  # item rx ry rw rh
   local id=$1 rx=$2 ry=$3 rw=$4 rh=$5 w h k
   igt "$id" w; w=${REPLY:-0}; igt "$id" h; h=${REPLY:-0}
-  igt "$id" size; PX_EM=${REPLY:-0}
+  igt "$id" psize; [[ -n "$REPLY" ]] || igt "$id" size; PX_EM=${REPLY:-0}
   local L R T Bt
   PX_REF=$rw; lv "i_$id" left;   L=$REPLY;  [[ -n "$L" ]] && { px "$L" "i_$id" left; L=$REPLY; }
   PX_REF=$rw; lv "i_$id" right;  R=$REPLY;  [[ -n "$R" ]] && { px "$R" "i_$id" right; R=$REPLY; }
@@ -695,9 +734,25 @@ ly_absolute() {  # item rx ry rw rh
   if [[ -n "$T" ]]; then ist "$id" y $(( ry + T ))
   elif [[ -n "$Bt" ]]; then ist "$id" y $(( ry + rh - Bt - h ))
   else ist "$id" y $(( ry + (rh - h) / 2 )); fi
-  lv "i_$id" vertical-align
-  if [[ "$REPLY" == baseline ]]; then
-    lv "i_$id" type; [[ "$REPLY" == text ]] || lerr "i_$id" vertical-align "vertical-align = baseline is for text"
+  lv "i_$id" vertical-align; local va=$REPLY
+  case "$va" in
+    ""|baseline|text-top) ;;
+    *) lerr "i_$id" vertical-align "vertical-align is baseline or text-top" ;;
+  esac
+  if [[ -n "$va" ]]; then
+    lv "i_$id" type; [[ "$REPLY" == text ]] || lerr "i_$id" vertical-align "vertical-align is for text"
+  fi
+  if [[ "$va" == text-top ]]; then
+    # -annotate with north gravity: top measures to the top of the letters
+    [[ -n "$T" ]] || lerr "i_$id" vertical-align "vertical-align = text-top needs top"
+    local asc desc
+    igt "$id" font; local f=$REPLY; igt "$id" psize; local ps=$REPLY; igt "$id" text
+    read -r asc desc < <(text_metrics "$f" "$ps" "$REPLY")
+    ist "$id" h $(( asc - desc ))
+    if [[ -n "$R" ]]; then ist "$id" annot "northeast +$(( FW - rx - rw + R ))+$(( ry + T ))"
+    else ist "$id" annot "northwest +$(( rx + ${L:-0} ))+$(( ry + T ))"; fi
+  fi
+  if [[ "$va" == baseline ]]; then
     [[ -n "$Bt" ]] || lerr "i_$id" vertical-align "vertical-align = baseline needs bottom"
     # The box from the font's ascent to its descent around the baseline; keep-clear areas stop at the baseline
     local base=$(( ry + rh - Bt )) asc desc
@@ -717,6 +772,16 @@ text_metrics() {  # font size text
   magick -debug annotate xc: -font "$1" -pointsize "$2" -annotate 0 "$t" null: 2>&1 |
     sed -n 's/.*ascent: \([-0-9.]*\); descent: \([-0-9.]*\).*/\1 \2/p' | head -1 |
     awk '{ printf "%d %d\n", $1, $2 }'
+}
+
+# The contact sheet's film-edge print: its own fixed geometry (edge_print_args), text at the item's size
+ly_edge_setup() {  # item
+  font_prop "$1" size; PX_REF="" px "$REPLY" "$TP_SEC" "$TP_KEY"; ist "$1" psize "$REPLY"
+  ist "$1" w 0; ist "$1" h "$REPLY"
+}
+ly_edge_place() {  # item: the row is centred 85% of the side border down from the top
+  local pe; igt "$1" psize; pe=$REPLY
+  ist "$1" x "$PAD_L"; ist "$1" y $(( PAD_L * 85 / 100 - pe / 2 )); ist "$1" w $(( FW - 2 * PAD_L ))
 }
 
 # A rectangle: inset from its region's edges (negative = outside)
@@ -739,8 +804,8 @@ ly_photo_place() {
       igt "$id" anchor; [[ "$REPLY" == "$a" ]] || continue
       igt "$id" abs; [[ "$REPLY" == 1 ]] && continue
       lv "i_$id" type; t=$REPLY
-      [[ "$t" == rect ]] && continue
-      [[ "$t" == text ]] && { ly_maxw "$id" "$W"; ly_text_fit "$id" "$REPLY"; }
+      [[ "$t" == rect || "$t" == edge-print ]] && continue
+      [[ "$t" == text ]] && { ly_text_width "$id" "$W" || { ly_maxw "$id" "$W"; ly_text_fit "$id" "$REPLY"; }; }
       [[ "$t" == rule ]] && { igt "$id" ml; w=$(( W - REPLY )); igt "$id" mr; ist "$id" w $(( w - REPLY )); }
       igt "$id" h; sh=$(( sh + REPLY )); igt "$id" mt; sh=$(( sh + REPLY )); igt "$id" mb; sh=$(( sh + REPLY ))
       stk="$stk $id"
@@ -818,6 +883,7 @@ ly_draw() {
   paper   # (adds the texture to the canvas)
   args=( -size ${FW}x${FH} "${canvas[@]}" )
   if [[ "$PHOTO_FX" == drop-shadow ]]; then photo_shadow_args $PAD_L $PAD_T $PAD_L; args+=( "${SHADOW_ARGS[@]}" ); fi
+  if [[ "$PHOTO_FX" == bevel ]]; then photo_bevel_args $PAD_L $PAD_T $BEVEL_W "$BEVEL_C"; args+=( "${BEVEL_ARGS[@]}" ); fi
   args+=( -gravity northwest )
   for id in $PLAN_ITEMS; do   # rectangles under the photo
     lv "i_$id" type; [[ "$REPLY" == rect ]] || continue
@@ -843,27 +909,22 @@ ly_draw() {
             local g=${a%% *} off=${a#* } ox oy dark=0.45 light=0.55
             tprop "$id" color; [[ "$REPLY" == auto-dim ]] && { dark=0.3; light=0.35; }
             off=${off#+}; ox=${off%%+*}; oy=${off#*+}
-            if [[ "$g" == southwest ]]; then
-              args+=( -fill "rgba(0,0,0,$dark)" -gravity $g -annotate +$(( ox - ENG_O ))+$(( oy + ENG_O )) "$s"
-                      -fill "rgba(255,255,255,$light)" -gravity $g -annotate +$(( ox + ENG_O ))+$(( oy - ENG_O )) "$s" )
-            else
-              args+=( -fill "rgba(0,0,0,$dark)" -gravity $g -annotate +$(( ox + ENG_O ))+$(( oy + ENG_O )) "$s"
-                      -fill "rgba(255,255,255,$light)" -gravity $g -annotate +$(( ox - ENG_O ))+$(( oy - ENG_O )) "$s" )
-            fi
+            # Offsets count from the gravity's edges: moving left/up is +x on the east, +y on the south
+            local ex=-1 ey=-1; [[ "$g" == *east ]] && ex=1; [[ "$g" == south* ]] && ey=1
+            args+=( -fill "rgba(0,0,0,$dark)" -gravity $g -annotate +$(( ox + ex * ENG_O ))+$(( oy + ey * ENG_O )) "$s"
+                    -fill "rgba(255,255,255,$light)" -gravity $g -annotate +$(( ox - ex * ENG_O ))+$(( oy - ey * ENG_O )) "$s" )
           fi
           args+=( -fill "$fill" -gravity "${a%% *}" -annotate "${a#* }" "$s" )
           (( k )) && args+=( -kerning 0 )
         else
-          ly_text_shadows "$id"; igt "$id" shadows
-          while read -r sf sx sy p; do
-            [[ -n "$sf" ]] && args+=( "$sf" -gravity northwest -geometry +$(( x + sx - p ))+$(( y + sy - p )) -composite )
-          done <<<"$REPLY"
+          ly_text_shadows "$id" $x $y
           igt "$id" img; ly_engraved "$REPLY" $x $y
           args+=( "$REPLY" -gravity northwest -geometry +$x+$y -composite )
         fi ;;
       logo) igt "$id" img; ly_engraved "$REPLY" $x $y; args+=( "$REPLY" -gravity northwest -geometry +$x+$y -composite ) ;;
       rule) igt "$id" fill; args+=( -fill "$REPLY" -draw "rectangle $x,$y $(( x + w - 1 )),$(( y + h - 1 ))" ) ;;
       rect) lv "i_$id" under-photo; [[ "$REPLY" == yes ]] || ly_draw_rect "$id" ;;
+      edge-print) igt "$id" psize; edge_print_args "$PAD_L" "$REPLY"; args+=( "${EDGE_ARGS[@]}" ) ;;
     esac
   done
   return 0

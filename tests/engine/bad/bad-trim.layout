@@ -1,0 +1,6 @@
+[frame]
+padding = 3pmin
+
+[text t]
+content = x
+text-box-trim = end

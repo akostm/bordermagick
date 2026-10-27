@@ -1,0 +1,14 @@
+# Magazine cover: a red border with a thin white line around the photo; no text
+[layout]
+category    = Print
+description = Magazine-cover red border with a white inner line, no text
+
+[frame]
+padding    = 5.5pmin+1pmin
+background = #E3120B
+
+[rect line]
+cell        = photo center
+inset       = -1pmin
+fill        = white
+under-photo = yes

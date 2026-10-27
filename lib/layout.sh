@@ -7,7 +7,7 @@
 #   LYS_<sec>__<key>   file:line         LY_ITEMS    item names in order; LYV_i_<name>__type = item type
 # layout_get SECTION KEY reads a value. LY_VAR_border / LY_VAR_paper fill in $border / $paper.
 
-LY_TEXT_KEYS="color font font-family font-size font-weight font-style letter-spacing line-height text-transform text-shadow max-width overflow"
+LY_TEXT_KEYS="color font font-family font-size font-weight font-style letter-spacing line-height text-transform text-shadow text-box-trim max-width overflow"
 LY_ITEM_KEYS="cell justify margin position left right top bottom vertical-align remove"
 LY_BANDS="top bottom left right"
 LY_TYPES="text logo rule rect edge-print image"
@@ -19,7 +19,7 @@ ly_keys() {  # section type -> the keys it allows
     frame)      echo "padding background texture text-effect $LY_TEXT_KEYS" ;;
     photo)      echo "effect" ;;
     top|bottom|left|right) echo "columns rows column-gap row-gap padding align-items $LY_TEXT_KEYS" ;;
-    text)       echo "$LY_ITEM_KEYS content $LY_TEXT_KEYS" ;;
+    text)       echo "$LY_ITEM_KEYS content width $LY_TEXT_KEYS" ;;
     logo)       echo "$LY_ITEM_KEYS height" ;;
     rule)       echo "$LY_ITEM_KEYS thickness color" ;;
     rect)       echo "$LY_ITEM_KEYS inset fill stroke stroke-width under-photo" ;;

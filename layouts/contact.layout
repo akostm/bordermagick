@@ -1,0 +1,53 @@
+# Film contact sheet: a black frame printed in amber, everything in condensed capitals like a film edge,
+# with the edge print along the top (maker, film simulation, ISO, frame numbers) instead of a logo
+[layout]
+category    = Film
+description = Black contact-sheet frame printed in amber, with film-edge markings
+
+[frame]
+padding        = 3pmin+3pmin 3pmin 11pmin
+background     = film
+font           = 2.2pmin DIN Condensed
+color          = #F2B134
+text-transform = uppercase
+
+[bottom]
+columns = 1fr 1fr
+
+# One text size throughout, so both sides mirror each other: a bright line over a dim line
+[text title]
+cell           = bottom 1
+position       = absolute
+left           = 0
+bottom         = 6.4pmin
+vertical-align = baseline
+content        = {title|city|filename}
+
+[text sub]
+cell           = bottom 1
+position       = absolute
+left           = 0
+bottom         = 3pmin
+vertical-align = baseline
+color          = rgba(242,177,52,0.6)
+content        = {place} ∙ {date}
+
+[text camera]
+cell           = bottom 2
+position       = absolute
+right          = 0
+bottom         = 6.4pmin
+vertical-align = baseline
+content        = {model} ∙ {lens}
+
+[text exposure]
+cell           = bottom 2
+position       = absolute
+right          = 0
+bottom         = 3pmin
+vertical-align = baseline
+color          = rgba(242,177,52,0.6)
+content        = {focal} ∙ {aperture} ∙ {shutter}
+
+[edge-print film]
+cell = top 1
